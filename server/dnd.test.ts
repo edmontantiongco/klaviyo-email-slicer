@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildRows, idsFromKlaviyoUrl, insertRows, matchColumnLayout, removeBlocks, replaceImages, stripIds, summarize, type Json } from './dnd.ts'
+import { buildRows, idsFromKlaviyoUrl, insertRows, matchColumnLayout, removeBlocks, replaceImages, stripIds, summarize, swapImages, type Json } from './dnd.ts'
 
 const img = (id: string, src: string, href = '', extra: Json = {}): Json => ({
   id,
@@ -178,6 +178,35 @@ describe('remove now, insert later', () => {
   it('refuses an anchor that no longer fits the layout', () => {
     expect(() => insertRows(fixture(), { section: 9, row: 0, newSection: false, label: '' }, slices)).toThrow(/layout changed/)
     expect(() => insertRows(fixture(), { section: 1, row: 99, newSection: false, label: '' }, slices)).toThrow(/layout changed/)
+  })
+})
+
+describe('swapImages (revised in Figma)', () => {
+  it('replaces only the revised images, in place, keeping everything else', () => {
+    const def = fixture()
+    const r = swapImages(def, [
+      { oldUrl: 'https://cdn/old2.jpg', src: 'https://k/old2-v2.jpg', assetId: 'A9', href: 'https://x/new', alt: 'Revised' },
+      { oldUrl: 'https://cdn/not-in-campaign.jpg', src: 'https://k/x.jpg' },
+    ])
+    expect(r.counts).toEqual([1, 0])
+    const s = summarize(r.definition)
+    expect(s.images.map((i) => i.src)).toEqual(['https://cdn/logo.png', 'https://cdn/old1.jpg', 'https://k/old2-v2.jpg', 'https://cdn/g1.jpg', 'https://cdn/g2.jpg', 'https://cdn/g3.jpg', 'https://cdn/social.png'])
+    const b = r.definition.body.sections[1].rows[1].columns[0].blocks[0]
+    expect(b.id).toBe('old2') // same block, same place
+    expect(b.data.properties).toMatchObject({ asset_id: 'A9', href: 'https://x/new', alt_text: 'Revised' })
+    expect(JSON.stringify(def)).toContain('https://cdn/old2.jpg') // input untouched
+  })
+  it('matches by asset id too, and rewrites URLs inside HTML blocks', () => {
+    const def = fixture()
+    def.body.sections[1].rows[0].columns[0].blocks[0].data.properties.asset_id = 'OLD1'
+    def.body.sections[1].rows[3].columns[0].blocks.push({ type: 'html', data: { content: '<img src="https://cdn/g1.jpg">', display_options: {} } })
+    const r = swapImages(def, [
+      { oldUrl: 'https://elsewhere/old1.jpg', oldAssetId: 'OLD1', src: 'https://k/hero.jpg' },
+      { oldUrl: 'https://cdn/g1.jpg', src: 'https://k/g1-v2.jpg' },
+    ])
+    expect(r.counts).toEqual([1, 2])
+    expect(r.definition.body.sections[1].rows[0].columns[0].blocks[0].data.properties.src).toBe('https://k/hero.jpg')
+    expect(r.definition.body.sections[1].rows[3].columns[0].blocks[1].data.content).toContain('https://k/g1-v2.jpg')
   })
 })
 

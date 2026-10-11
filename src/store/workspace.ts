@@ -20,8 +20,11 @@ import {
   type LayoutAnalysis,
   type Slice,
   type SliceLayout,
+  layoutFromFigmaSlices,
+  carryOverMeta,
 } from '@/lib/slicing'
 import { slugify } from '@/lib/utils'
+import { pixelsDiffer } from '@/lib/revisions'
 import { resolveScale, useSettings } from './settings'
 
 export type JobStep = 'slice' | 'optimize' | 'upload'
@@ -84,6 +87,24 @@ export interface EmailJob {
   template?: { id: string; name: string; createdAt: number }
   /** Cloned Klaviyo campaign whose images get replaced by this job's slices. */
   campaign?: CampaignLink
+  /** 'figma' when the slices come from Figma Slice layers (Figma is the source of truth). */
+  sliceSource?: 'figma' | 'auto'
+  /** Notes from turning Figma slices into the layout (unsliced areas, overlaps…). */
+  sliceWarnings?: string[]
+  /**
+   * Slices revised in Figma after they were uploaded, keyed by slice id: the image that is
+   * currently in Klaviyo, so "Update revised slices" can swap exactly that image in the campaign.
+   */
+  revisions?: Record<string, RevisionRecord>
+  /** Result of the last "Refresh from Figma". */
+  lastRefresh?: { at: number; changed: string[]; added: string[]; removed: string[]; unchanged: number; resized: boolean }
+}
+
+export interface RevisionRecord {
+  name: string
+  oldUrl: string
+  oldKlaviyoId?: string
+  at: number
 }
 
 export interface CampaignLink {
@@ -114,6 +135,8 @@ interface WorkspaceState {
   addFigmaJobs: (fileKey: string, fileName: string, frames: EmailFrameInfo[]) => void
   addUploadJobs: (files: File[]) => void
   reloadJob: (id: string) => void
+  /** Re-render from Figma, keep unchanged slices, flag revised ones. */
+  refreshFromFigma: (id: string) => Promise<void>
   runAutoSlice: (id: string, options?: AutoSliceOptions) => void
   setLayout: (id: string, layout: SliceLayout, opts?: { history?: boolean }) => void
   pushHistory: (id: string) => void
@@ -160,6 +183,15 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => {
     loadChain = loadChain.then(fn, fn)
   }
 
+  /** Figma Slice layers win when the frame has them; otherwise auto-slice. */
+  function initialLayout(analysis: LayoutAnalysis, autoOptions: AutoSliceOptions) {
+    if (analysis.figmaSlices?.length) {
+      const { layout, warnings } = layoutFromFigmaSlices(analysis.figmaSlices, analysis.width, analysis.height)
+      return { layout: suggestCellMeta(layout, analysis), sliceSource: 'figma' as const, sliceWarnings: warnings }
+    }
+    return { layout: suggestCellMeta(autoSlice(analysis, autoOptions), analysis), sliceSource: 'auto' as const, sliceWarnings: [] as string[] }
+  }
+
   async function finishLoad(id: string, blob: Blob, analysisFor: (bitmap: ImageBitmap) => LayoutAnalysis, scale: number) {
     const bitmap = await loadBitmap(blob)
     patchJob(id, { loadingLabel: 'Detecting safe slice lines…' })
@@ -169,7 +201,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => {
     analysis.width = bitmap.width
     analysis.height = bitmap.height
     const autoOptions = scaledDefaults(bitmap.width)
-    const layout = suggestCellMeta(autoSlice(analysis, autoOptions), analysis)
+    const { layout, sliceSource, sliceWarnings } = initialLayout(analysis, autoOptions)
     const prev = job(id)
     if (prev?.imageUrl) URL.revokeObjectURL(prev.imageUrl)
     patchJob(id, {
@@ -185,6 +217,10 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => {
       analysis,
       autoOptions,
       layout,
+      sliceSource,
+      sliceWarnings,
+      revisions: {},
+      lastRefresh: undefined,
       past: [],
       future: [],
       step: 'slice',
@@ -269,7 +305,8 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => {
     addFigmaJobs: (fileKey, fileName, frames) => {
       const created = frames.map((f) => baseJob(f.name, { kind: 'figma', fileKey, nodeId: f.id, fileName }))
       set((s) => ({ jobs: [...s.jobs, ...created], activeId: created[0]?.id ?? s.activeId, view: 'job' }))
-      created.forEach((c) => enqueueLoad(() => loadFigma(c.id)))
+      // Always render fresh on import, so a recent edit in Figma is never missed.
+      created.forEach((c) => enqueueLoad(() => loadFigma(c.id, true)))
     },
 
     addUploadJobs: (files) => {
@@ -283,6 +320,112 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => {
       if (!j) return
       if (j.source.kind === 'figma') enqueueLoad(() => loadFigma(id, true))
       else if (j.imageBlob) void loadUpload(id, j.imageBlob)
+    },
+
+    refreshFromFigma: async (id) => {
+      const j = job(id)
+      if (!j || j.source.kind !== 'figma' || j.status !== 'ready' || !j.bitmap || !j.layout) return
+      const { fileKey, nodeId } = j.source
+      try {
+        const { document: frame } = await api.figmaNode(fileKey, nodeId)
+        const blob = await api.figmaRender(fileKey, nodeId, j.scale, true)
+        const bitmap = await loadBitmap(blob)
+        const analysis = analyzeFigmaFrame(frame, j.scale)
+        analysis.width = bitmap.width
+        analysis.height = bitmap.height
+        const resized = bitmap.width !== j.width || bitmap.height !== j.height
+
+        // Slices: Figma Slice layers if present (keeping links/alt set in the app), else keep the
+        // app's slices unless the email changed size.
+        let layout: SliceLayout
+        let sliceSource: 'figma' | 'auto'
+        let sliceWarnings: string[]
+        if (analysis.figmaSlices?.length) {
+          const built = layoutFromFigmaSlices(analysis.figmaSlices, analysis.width, analysis.height)
+          layout = suggestCellMeta(carryOverMeta(built.layout, j.layout), analysis)
+          sliceSource = 'figma'
+          sliceWarnings = built.warnings
+        } else if (!resized) {
+          layout = j.layout
+          sliceSource = j.sliceSource ?? 'auto'
+          sliceWarnings = j.sliceWarnings ?? []
+        } else {
+          layout = carryOverMeta(suggestCellMeta(autoSlice(analysis, scaledDefaults(bitmap.width)), analysis), j.layout)
+          sliceSource = 'auto'
+          sliceWarnings = ['The email changed size in Figma, so it was re-sliced automatically. Add Slice layers in Figma to keep slices stable.']
+        }
+
+        // Compare every slice with the previous render; only changed ones lose their result/upload.
+        const oldSlices = new Map(getSlices(j.layout).map((s) => [s.id, s]))
+        const newSlices = getSlices(layout)
+        const results = { ...j.results }
+        const uploads = { ...j.uploads }
+        const revisions = { ...(j.revisions ?? {}) }
+        const changed: string[] = []
+        const added: string[] = []
+        let unchanged = 0
+        for (const s of newSlices) {
+          const o = oldSlices.get(s.id)
+          if (!o) {
+            added.push(s.meta.name)
+            continue
+          }
+          const differ = sliceSignature(o) !== sliceSignature(s) || pixelsDiffer(cropImageData(j.bitmap, o), cropImageData(bitmap, s))
+          if (!differ) {
+            unchanged++
+            if (revisions[s.id]) revisions[s.id] = { ...revisions[s.id], name: s.meta.name }
+            continue
+          }
+          changed.push(s.meta.name)
+          const u = uploads[s.id]
+          // Remember the image that is in Klaviyo now (only the first time, until it is swapped).
+          if (u?.status === 'done' && u.url && !revisions[s.id]) revisions[s.id] = { name: s.meta.name, oldUrl: u.url, oldKlaviyoId: u.klaviyoId, at: Date.now() }
+          if (results[s.id]?.url) URL.revokeObjectURL(results[s.id].url!)
+          delete results[s.id]
+          delete uploads[s.id]
+          void del(`res:${id}:${s.id}`)
+        }
+        const newIds = new Set(newSlices.map((s) => s.id))
+        const removed = [...oldSlices.values()].filter((s) => !newIds.has(s.id)).map((s) => s.meta.name)
+
+        const before = job(id)!
+        if (before.imageUrl) URL.revokeObjectURL(before.imageUrl)
+        const oldBitmap = before.bitmap
+        patchJob(id, (x) => ({
+          imageBlob: blob,
+          imageUrl: URL.createObjectURL(blob),
+          bitmap,
+          width: bitmap.width,
+          height: bitmap.height,
+          analysis,
+          layout,
+          sliceSource,
+          sliceWarnings,
+          results,
+          uploads,
+          revisions,
+          lastRefresh: { at: Date.now(), changed, added, removed, unchanged, resized },
+          past: x.layout ? [...x.past.slice(-99), x.layout] : x.past,
+          future: [],
+        }))
+        oldBitmap?.close()
+        void idbSet(`img:${id}`, blob)
+
+        if (!changed.length && !added.length && !removed.length) toast.success('No changes in Figma', { description: `All ${unchanged} slices match the design.` })
+        else
+          toast.success(`${changed.length} slice${changed.length === 1 ? '' : 's'} changed in Figma`, {
+            description: [
+              changed.length ? `Changed: ${changed.join(', ')}.` : '',
+              added.length ? `New: ${added.join(', ')}.` : '',
+              removed.length ? `Removed: ${removed.join(', ')}.` : '',
+              changed.length || added.length ? 'Review and approve them in Optimize & review.' : '',
+            ]
+              .filter(Boolean)
+              .join(' '),
+          })
+      } catch (err) {
+        toast.error('Could not refresh from Figma', { description: (err as Error).message })
+      }
     },
 
     runAutoSlice: (id, options) => {

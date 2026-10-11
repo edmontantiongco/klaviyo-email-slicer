@@ -58,6 +58,21 @@ You can put keys in `.env` or paste them into **Settings** (⚙). Keys entered i
 
 The header's ⬇ button exports a **ZIP** with the images, `index.html` and `manifest.json` (coordinates, sizes, links, alt text). Your workspace is saved in IndexedDB, so a page refresh doesn't lose any work.
 
+## Figma slices and revisions
+
+If the email frame has **Slice layers** (Figma's Slice tool, shortcut S, e.g. "Slice 37"), the app uses them as its slices: the same areas and the same names. They're also the image names in Klaviyo. Each slice is tied to its Figma layer, so renaming it in Figma renames it in the app (and in Klaviyo on the next upload). Frames without Slice layers are auto-sliced as before.
+
+- Side-by-side slices become columns of one row. Gaps of 3px or less from fractional Figma coordinates are snapped closed.
+- Any part of the email no slice covers is kept as an **Unsliced area** piece, with a warning, so nothing goes missing. Add a slice in Figma to give it a name.
+
+**Revising a section:**
+1. Edit the section in Figma.
+2. Click **Refresh from Figma** (in the Slice step, or at the top of the Upload step). The app re-renders the email and compares every slice pixel by pixel. Unchanged slices keep their compression, approval and Klaviyo upload. Changed ones are flagged **Revised in Figma** and go back for compression and your approval.
+3. Approve the revised slices in **Optimize & review**.
+4. In **Update cloned campaign**, load the campaign and click **Update N revised slices in campaign**. Only those images are uploaded again and replaced in place. Their position, the layout and everything else in the email stay the same.
+
+The ↻ icon next to Refresh starts the email over from Figma, which discards compression, approvals and uploads.
+
 ## Project layout
 
 ```

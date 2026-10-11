@@ -173,6 +173,17 @@ export const api = {
     anchor?: SliceAnchor
   }) => post<CampaignReplaceResult>('/api/klaviyo/campaign/replace', body),
 
+  klaviyoSwapCampaignImages: (body: {
+    campaignId: string
+    swaps: { oldUrl: string; oldAssetId?: string; src: string; assetId?: string; href?: string; alt?: string }[]
+    dryRun: boolean
+    templateUpdated?: string | null
+  }) =>
+    post<{ dryRun: boolean; applied: boolean; counts: number[]; templateId?: string; templateUpdated?: string | null; after?: CampaignInfo['summary'] }>(
+      '/api/klaviyo/campaign/swap',
+      body,
+    ),
+
   klaviyoRemoveCampaignImages: (body: { campaignId: string; removeKeys: string[]; dryRun: boolean; templateUpdated?: string | null }) =>
     post<CampaignRemoveResult>('/api/klaviyo/campaign/remove', body),
 }

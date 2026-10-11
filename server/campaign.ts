@@ -1,7 +1,7 @@
 import { Router, type Request } from 'express'
 import { HttpError, fetchWithRetry } from './http.ts'
 import { KLAVIYO_API, headers, readKlaviyo } from './klaviyo.ts'
-import { idsFromKlaviyoUrl, insertRows, removeBlocks, replaceImages, stripIds, summarize, type SliceAnchor, type SliceRowInput } from './dnd.ts'
+import { idsFromKlaviyoUrl, insertRows, removeBlocks, replaceImages, stripIds, summarize, swapImages, type ImageSwap, type SliceAnchor, type SliceRowInput } from './dnd.ts'
 import type { Json } from './dnd.ts'
 
 /**
@@ -159,6 +159,36 @@ function checkFresh(l: Loaded, templateUpdated?: string | null) {
     throw new HttpError(409, 'The campaign’s email was edited in Klaviyo since you loaded it. Reload the campaign and check the images again.')
   }
 }
+
+/**
+ * Swap revised images in place (after "Refresh from Figma"): each old image in the campaign is
+ * replaced by its revised upload. Position, size and everything else in the email stay put.
+ */
+campaignRouter.post('/swap', async (req, res) => {
+  const { campaignId, swaps, dryRun, templateUpdated } = req.body ?? {}
+  if (!campaignId || !Array.isArray(swaps) || !swaps.length) throw new HttpError(400, 'campaignId and swaps are required')
+  for (const sw of swaps as ImageSwap[]) {
+    if (!sw.oldUrl) throw new HttpError(400, 'Every swap needs the old image URL')
+    if (!dryRun && !/^https:\/\//.test(sw.src ?? '')) throw new HttpError(400, 'Upload the revised slices to Klaviyo before updating the campaign.')
+  }
+  const l = await loadCampaign(req, { campaignId })
+  assertEditable(l)
+  checkFresh(l, templateUpdated)
+  const result = swapImages(l.definition!, swaps)
+  const found = result.counts.filter((c) => c > 0).length
+  if (dryRun || !found) return void res.json({ dryRun: !!dryRun, counts: result.counts, applied: false })
+  const applied = await applyDefinition(req, l, result.definition)
+  const after = await loadCampaign(req, { campaignId })
+  res.json({
+    dryRun: false,
+    applied: true,
+    counts: result.counts,
+    method: applied.method,
+    templateId: applied.templateId,
+    templateUpdated: after.template.updated,
+    after: after.definition ? summarize(after.definition) : null,
+  })
+})
 
 /**
  * Remove the chosen image blocks right away, without inserting anything (dryRun = preview only).

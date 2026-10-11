@@ -1,3 +1,4 @@
+import { collectFigmaSlices } from './figmaSlices'
 import { clipRect } from './geometry'
 import type { Blocker, BlockerKind, LayoutAnalysis, Rect, Section } from './types'
 
@@ -137,7 +138,7 @@ export function analyzeFigmaFrame(frame: FigmaNode, scale: number): LayoutAnalys
   const height = Math.round(fb.height * scale)
   const edges = [...new Set(sections.flatMap((s) => [s.top, s.bottom]))].filter((e) => e > 0 && e < height)
 
-  return { source: 'figma', width: Math.round(fb.width * scale), height, blockers, sections, edges }
+  return { source: 'figma', width: Math.round(fb.width * scale), height, blockers, sections, edges, figmaSlices: collectFigmaSlices(frame, scale) }
 }
 
 export interface EmailFrameInfo {

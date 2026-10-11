@@ -343,6 +343,64 @@ export function replaceImages(original: Json, removeKeys: string[], sliceRows: S
   return { ...ins, removed: removed.removed, warnings: [...ins.warnings, ...removed.warnings] }
 }
 
+export interface ImageSwap {
+  /** Image currently in the campaign (the URL Klaviyo gave the old upload). */
+  oldUrl: string
+  oldAssetId?: string
+  /** Revised image. */
+  src: string
+  assetId?: string
+  /** Link / alt text from the app; omitted = keep what the block has. */
+  href?: string
+  alt?: string
+}
+
+export interface SwapResult {
+  definition: Json
+  /** Blocks updated per swap (same order as the input). */
+  counts: number[]
+}
+
+/**
+ * Replaces revised images in place: every image block whose src (or asset id) is the old image
+ * gets the new src/asset id (and link/alt if given). HTML blocks have the URL replaced in their markup.
+ * Nothing else moves.
+ */
+export function swapImages(original: Json, swaps: ImageSwap[]): SwapResult {
+  const def: Json = structuredClone(original)
+  const counts = swaps.map(() => 0)
+  for (const section of sectionsOf(def)) {
+    for (const row of section.rows ?? []) {
+      for (const col of row.columns ?? []) {
+        for (const block of col.blocks ?? []) {
+          if (block.type === 'image') {
+            const p = block?.data?.properties
+            if (!p || p.dynamic === true) continue
+            const i = swaps.findIndex((sw) => (sw.oldUrl && p.src === sw.oldUrl) || (sw.oldAssetId && p.asset_id === sw.oldAssetId))
+            if (i < 0) continue
+            const sw = swaps[i]
+            p.src = sw.src
+            if (sw.assetId) p.asset_id = sw.assetId
+            else delete p.asset_id
+            if (p.cropping_properties) delete p.cropping_properties
+            if (sw.href !== undefined) p.href = sw.href
+            if (sw.alt !== undefined) p.alt_text = sw.alt
+            counts[i]++
+          } else if (block.type === 'html' && typeof block?.data?.content === 'string') {
+            swaps.forEach((sw, i) => {
+              if (sw.oldUrl && block.data.content.includes(sw.oldUrl)) {
+                block.data.content = block.data.content.split(sw.oldUrl).join(sw.src)
+                counts[i]++
+              }
+            })
+          }
+        }
+      }
+    }
+  }
+  return { definition: def, counts }
+}
+
 /** Drops ids so a definition can be used to create a brand-new template. */
 export function stripIds(def: Json): Json {
   const walk = (v: any): any => {

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { AlertTriangle, CheckCircle2, ExternalLink, Eye, Loader2, MapPin, Megaphone, RefreshCw, Replace, Trash2, X, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, CircleDashed, ExternalLink, Eye, Frame, Loader2, MapPin, Megaphone, RefreshCw, Replace, Trash2, X, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -12,7 +12,8 @@ import { api, type CampaignInfo, type CampaignReplaceResult } from '@/lib/api'
 import { campaignRows, defaultSelection, describePlan } from '@/lib/campaign'
 import { cn } from '@/lib/utils'
 import { useSettings } from '@/store/settings'
-import { useWorkspace, type CampaignLink, type EmailJob } from '@/store/workspace'
+import { currentResult, useWorkspace, type CampaignLink, type EmailJob } from '@/store/workspace'
+import { getSlices } from '@/lib/slicing'
 
 interface Props {
   job: EmailJob
@@ -31,9 +32,10 @@ export function CampaignUpdate({ job, allApproved, keyReady }: Props) {
   const [info, setInfo] = useState<CampaignInfo | null>(null)
   const [selected, setSelected] = useState<string[]>(job.campaign?.selectedKeys ?? [])
   const [preview, setPreview] = useState<{ result: CampaignReplaceResult; sig: string } | null>(null)
-  const [busy, setBusy] = useState<null | 'load' | 'preview' | 'apply' | 'remove'>(null)
+  const [busy, setBusy] = useState<null | 'load' | 'preview' | 'apply' | 'remove' | 'swap'>(null)
   const [confirming, setConfirming] = useState(false)
   const [confirmRemove, setConfirmRemove] = useState(false)
+  const [confirmSwap, setConfirmSwap] = useState(false)
 
   const { rows, missingUploads } = useMemo(() => campaignRows(job, compress), [job, compress])
   // Spot left by "Remove from campaign" — used when no images are ticked.
@@ -137,6 +139,49 @@ export function CampaignUpdate({ job, allApproved, keyReady }: Props) {
     }
   }
 
+  // Slices revised in Figma since they were uploaded (set by "Refresh from Figma").
+  const revised = useMemo(() => {
+    if (!job.layout || !job.revisions) return []
+    return getSlices(job.layout)
+      .filter((s) => job.revisions![s.id])
+      .map((s) => ({ slice: s, rev: job.revisions![s.id], approved: !!currentResult(job, s, compress)?.approved }))
+  }, [job, compress])
+  const revisedReady = revised.length > 0 && revised.every((r) => r.approved)
+
+  const swapRevised = async () => {
+    if (!info) return
+    setConfirmSwap(false)
+    setBusy('swap')
+    try {
+      await uploadJob(job.id) // uploads the approved revisions (and syncs names)
+      const after = useWorkspace.getState().jobs.find((j) => j.id === job.id)!
+      const swaps = revised.map(({ slice, rev }) => {
+        const r = currentResult(after, slice, compress)
+        const u = after.uploads[slice.id]
+        if (!r || u?.status !== 'done' || u.key !== r.key || !u.url) throw new Error(`“${slice.meta.name}” isn’t uploaded yet — check the slice list above.`)
+        return { oldUrl: rev.oldUrl, oldAssetId: rev.oldKlaviyoId, src: u.url, assetId: u.klaviyoId, href: slice.meta.link.trim(), alt: slice.meta.alt.trim() }
+      })
+      const result = await api.klaviyoSwapCampaignImages({ campaignId: info.campaign.id, swaps, dryRun: false, templateUpdated: info.template.updated })
+      const notFound = revised.filter((_, i) => !result.counts[i]).map((r) => r.slice.meta.name)
+      const done = revised.length - notFound.length
+      // Clear the revisions that were handled; ones not found aren't in this campaign, so clear them too.
+      patchJob(job.id, { revisions: {} })
+      if (result.applied) {
+        saveLink({ templateUpdated: result.templateUpdated ?? null })
+        setInfo({ ...info, template: { ...info.template, id: result.templateId ?? info.template.id, updated: result.templateUpdated ?? null }, summary: result.after ?? info.summary })
+      }
+      if (done) toast.success(`Updated ${done} revised slice${done === 1 ? '' : 's'} in the campaign`, { description: 'Open it in Klaviyo to check, then send a test.' })
+      if (notFound.length)
+        toast.warning(`${notFound.join(', ')} ${notFound.length === 1 ? 'isn’t' : 'aren’t'} in this campaign`, {
+          description: 'Its old image wasn’t found in the email, so nothing was replaced for it. Use Update campaign to add it.',
+        })
+    } catch (e) {
+      toast.error('Could not update the revised slices', { description: (e as Error).message })
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const removeNow = async () => {
     if (!info) return
     setConfirmRemove(false)
@@ -197,6 +242,37 @@ export function CampaignUpdate({ job, allApproved, keyReady }: Props) {
             {info ? 'Reload' : 'Load campaign'}
           </Button>
         </div>
+
+        {revised.length > 0 && (
+          <div className="grid gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm" data-testid="campaign-revised">
+            <div className="flex flex-wrap items-center gap-2 font-medium">
+              <Frame className="size-4" /> {revised.length} slice{revised.length === 1 ? '' : 's'} revised in Figma
+            </div>
+            <ul className="grid gap-1 text-xs">
+              {revised.map(({ slice, approved }) => (
+                <li key={slice.id} className="flex items-center gap-1.5">
+                  {approved ? <CheckCircle2 className="text-success size-3.5" /> : <CircleDashed className="text-muted-foreground size-3.5" />}
+                  <span className="font-medium">{slice.meta.name}</span>
+                  <span className="text-muted-foreground">{approved ? 'approved' : 'needs your approval in Optimize & review'}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                onClick={() => setConfirmSwap(true)}
+                disabled={!canEdit || !revisedReady || !keyReady || !!busy}
+                data-testid="campaign-swap"
+              >
+                {busy === 'swap' ? <Loader2 className="animate-spin" /> : <Replace />}
+                Update {revised.length} revised slice{revised.length === 1 ? '' : 's'} in campaign
+              </Button>
+              <span className="text-muted-foreground text-xs">
+                {!info ? 'Load the campaign first.' : !revisedReady ? 'Approve the revised slices first.' : 'Only these images change; their position and everything else stay the same.'}
+              </span>
+            </div>
+          </div>
+        )}
 
         {info && (
           <div className="grid gap-3 rounded-lg border p-3">
@@ -358,6 +434,27 @@ export function CampaignUpdate({ job, allApproved, keyReady }: Props) {
             <Button variant="outline" onClick={() => setConfirming(false)}>Cancel</Button>
             <Button onClick={apply} data-testid="campaign-confirm">
               <Replace /> Update campaign
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={confirmSwap} onOpenChange={setConfirmSwap}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Update {revised.length} revised slice{revised.length === 1 ? '' : 's'} in “{info?.campaign.name}”?
+            </DialogTitle>
+            <DialogDescription>
+              The new version{revised.length === 1 ? ' is' : 's are'} uploaded, then each old image in the draft is replaced in place:{' '}
+              {revised.map((r) => r.slice.meta.name).join(', ')}. Nothing else in the email changes, and nothing is scheduled or sent. This can’t be undone
+              from the app.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmSwap(false)}>Cancel</Button>
+            <Button onClick={swapRevised} data-testid="campaign-swap-confirm">
+              <Replace /> Update in campaign
             </Button>
           </DialogFooter>
         </DialogContent>

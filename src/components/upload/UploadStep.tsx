@@ -19,6 +19,7 @@ import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { SettingsDialog } from '@/components/layout/SettingsDialog'
 import { CampaignUpdate } from '@/components/upload/CampaignUpdate'
+import { RefreshFromFigmaButton } from '@/components/common/FigmaSync'
 import { useHealth } from '@/hooks/useHealth'
 import { useJobSlices } from '@/hooks/useJobStats'
 import { klaviyoImageName, sliceFileName, sliceIndexLabel } from '@/lib/naming'
@@ -77,6 +78,7 @@ export function UploadStep({ job }: { job: EmailJob }) {
             <ArrowLeft /> Review
           </Button>
           <h1 className="text-xl font-semibold tracking-tight">Upload “{job.name}” to Klaviyo</h1>
+          <RefreshFromFigmaButton job={job} className="ml-auto" />
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
