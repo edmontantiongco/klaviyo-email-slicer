@@ -103,14 +103,12 @@ export function CampaignUpdate({ job, allApproved, keyReady }: Props) {
     setConfirming(false)
     setBusy('apply')
     try {
-      let toSend = rows
-      if (missingUploads) {
-        await uploadJob(job.id)
-        const after = useWorkspace.getState().jobs.find((j) => j.id === job.id)!
-        const again = campaignRows(after, compress)
-        if (again.missingUploads) throw new Error(`${again.missingUploads} slice upload(s) failed — retry them in the list above, then update the campaign.`)
-        toSend = again.rows
-      }
+      // Uploads anything missing and brings Klaviyo image names in line with the slice names (no-op otherwise).
+      await uploadJob(job.id)
+      const after = useWorkspace.getState().jobs.find((j) => j.id === job.id)!
+      const again = campaignRows(after, compress)
+      if (again.missingUploads) throw new Error(`${again.missingUploads} slice upload(s) failed — retry them in the list above, then update the campaign.`)
+      const toSend = again.rows
       const result = await api.klaviyoReplaceCampaignImages({
         campaignId: info.campaign.id,
         removeKeys: selected,

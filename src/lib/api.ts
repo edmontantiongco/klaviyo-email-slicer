@@ -147,6 +147,13 @@ export const api = {
     })
   },
 
+  klaviyoRenameImage: (id: string, name: string) =>
+    json<{ id: string; name: string }>(`/api/klaviyo/images/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name }),
+    }),
+
   klaviyoCreateTemplate: (name: string, html: string, editorType: 'CODE' | 'USER_DRAGGABLE') =>
     json<{ id: string; name: string }>('/api/klaviyo/templates', {
       method: 'POST',

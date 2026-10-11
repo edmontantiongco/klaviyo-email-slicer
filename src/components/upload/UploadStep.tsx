@@ -28,7 +28,7 @@ import { BackgroundPicker } from '@/components/common/BackgroundPicker'
 import { useHealth } from '@/hooks/useHealth'
 import { useJobSlices } from '@/hooks/useJobStats'
 import { downloadBlob, emailHtml, emailSnippet } from '@/lib/exporters'
-import { sliceFileName, sliceIndexLabel } from '@/lib/naming'
+import { klaviyoImageName, sliceFileName, sliceIndexLabel } from '@/lib/naming'
 import { cn, formatBytes, slugify } from '@/lib/utils'
 import { useSettings } from '@/store/settings'
 import { useWorkspace, type EmailJob } from '@/store/workspace'
@@ -101,7 +101,9 @@ export function UploadStep({ job }: { job: EmailJob }) {
               {(busy || uploading) && <Progress value={(stats.uploaded / Math.max(1, stats.total)) * 100} />}
               <div className="divide-y rounded-md border" data-testid="upload-list">
                 {rows.map(({ slice, result, upload }) => {
-                  const fileName = upload?.fileName ?? sliceFileName(job.uploadPrefix, slice, result?.format === 'png' ? 'png' : 'jpg')
+                  // Shown exactly as it will be (or is) named in Klaviyo.
+                  const fileName = klaviyoImageName(job.uploadPrefix, slice)
+                  const renamePending = upload?.status === 'done' && upload.name !== fileName
                   return (
                     <div key={slice.id} className="flex items-center gap-3 p-2">
                       <div className="checkerboard flex h-10 w-16 shrink-0 items-center justify-center overflow-hidden rounded border">
@@ -110,7 +112,8 @@ export function UploadStep({ job }: { job: EmailJob }) {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <span className="text-muted-foreground font-mono text-xs">{sliceIndexLabel(slice)}</span>
-                          <span className="truncate font-mono text-xs">{fileName}</span>
+                          <span className="truncate text-xs font-medium" title="Name in Klaviyo">{fileName}</span>
+                          {renamePending && <span className="shrink-0 text-[11px] text-amber-600 dark:text-amber-400">name changed — sync to Klaviyo</span>}
                         </div>
                         {upload?.status === 'done' && upload.url ? (
                           <button className="text-muted-foreground hover:text-foreground block max-w-full truncate text-left text-xs" onClick={() => copy(upload.url!, 'Image URL')}>
@@ -167,7 +170,7 @@ export function UploadStep({ job }: { job: EmailJob }) {
                   </Check>
                 </ul>
                 <div className="grid gap-1.5">
-                  <Label htmlFor="prefix">File name prefix</Label>
+                  <Label htmlFor="prefix">ZIP / HTML file name prefix</Label>
                   <Input
                     id="prefix"
                     value={job.uploadPrefix}
@@ -175,17 +178,20 @@ export function UploadStep({ job }: { job: EmailJob }) {
                     disabled={busy}
                   />
                   <p className="text-muted-foreground text-xs">
-                    e.g. <code>{rows[0] ? sliceFileName(job.uploadPrefix, rows[0].slice, 'jpg') : '—'}</code>
+                    e.g. <code>{rows[0] ? sliceFileName(job.uploadPrefix, rows[0].slice, 'jpg') : '—'}</code>. In Klaviyo, each image is named exactly
+                    like its slice (the <b>Name</b> field), e.g. <b>{rows[0] ? klaviyoImageName(job.uploadPrefix, rows[0].slice) : '—'}</b>.
                   </p>
                 </div>
                 <Button
                   data-testid="upload-start"
                   size="lg"
-                  disabled={!allApproved || !keyReady || busy || allUploaded}
-                  onClick={() => setConfirming(true)}
+                  disabled={!allApproved || !keyReady || busy || (allUploaded && !stats.renamePending)}
+                  onClick={() => (allUploaded ? start() : setConfirming(true))}
                 >
-                  {busy ? <Loader2 className="animate-spin" /> : allUploaded ? <CheckCircle2 /> : stats.uploadErrors ? <RotateCw /> : <CloudUpload />}
-                  {allUploaded
+                  {busy ? <Loader2 className="animate-spin" /> : allUploaded && !stats.renamePending ? <CheckCircle2 /> : stats.uploadErrors ? <RotateCw /> : <CloudUpload />}
+                  {allUploaded && stats.renamePending
+                    ? `Update ${stats.renamePending} name${stats.renamePending > 1 ? 's' : ''} in Klaviyo`
+                    : allUploaded
                     ? 'Uploaded'
                     : stats.uploadErrors
                       ? `Retry ${pending} upload${pending > 1 ? 's' : ''}`
@@ -247,8 +253,9 @@ export function UploadStep({ job }: { job: EmailJob }) {
           <DialogHeader>
             <DialogTitle>Upload {pending} images to Klaviyo?</DialogTitle>
             <DialogDescription>
-              They'll be added to your Klaviyo image library{settings.hideUploadsInLibrary ? ' (hidden)' : ''} as{' '}
-              <code>{job.uploadPrefix}_…</code>. You approved every slice; uploads can't be undone from here.
+              They'll be added to your Klaviyo image library{settings.hideUploadsInLibrary ? ' (hidden)' : ''} named
+              after each slice's <b>Name</b> (e.g. “{rows[0] ? klaviyoImageName(job.uploadPrefix, rows[0].slice) : ''}”). You approved every slice; uploads
+              can't be undone from here.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

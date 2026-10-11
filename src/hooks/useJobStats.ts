@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { getSlices, type Slice } from '@/lib/slicing'
 import { useSettings } from '@/store/settings'
+import { klaviyoImageName } from '@/lib/naming'
 import { currentResult, type EmailJob, type SliceResult, type UploadRecord } from '@/store/workspace'
 
 export interface SliceRow {
@@ -28,6 +29,8 @@ export function useJobSlices(job: EmailJob | undefined) {
       approved: done.filter((r) => r.result!.approved).length,
       uploaded: rows.filter((r) => r.upload?.status === 'done').length,
       uploadErrors: rows.filter((r) => r.upload?.status === 'error').length,
+      /** Uploaded, but the Klaviyo name no longer matches the slice name. */
+      renamePending: rows.filter((r) => r.upload?.status === 'done' && r.upload.name !== klaviyoImageName(job.uploadPrefix, r.slice)).length,
       bytes: done.reduce((a, r) => a + (r.result!.size ?? 0), 0),
       missingLinks: rows.filter((r) => !r.slice.meta.link.trim()).length,
       missingAlt: rows.filter((r) => !r.slice.meta.alt.trim()).length,
@@ -37,5 +40,5 @@ export function useJobSlices(job: EmailJob | undefined) {
 }
 
 function emptyStats() {
-  return { total: 0, done: 0, working: 0, errors: 0, overBudget: 0, approved: 0, uploaded: 0, uploadErrors: 0, bytes: 0, missingLinks: 0, missingAlt: 0 }
+  return { total: 0, done: 0, working: 0, errors: 0, overBudget: 0, approved: 0, uploaded: 0, uploadErrors: 0, renamePending: 0, bytes: 0, missingLinks: 0, missingAlt: 0 }
 }

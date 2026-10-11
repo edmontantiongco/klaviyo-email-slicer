@@ -45,6 +45,7 @@ You can put keys in `.env` or paste them into **Settings** (⚙). Keys entered i
    - **Email preview** renders the actual generated HTML from the compressed slices, at desktop and mobile widths.
 4. **Upload.** Pre-flight checks cover approvals, size budget, missing links or alt text, and the API key. Nothing uploads until **every slice is approved**.
    - The server paces uploads to stay within Klaviyo's limits (3/s, 100/min).
+   - Each image is named in Klaviyo exactly like its slice's **Name** in the app (e.g. `Test 1011 - 1`). If you rename a slice after uploading, the upload button changes to **Update N names in Klaviyo**, and the existing image is renamed rather than uploaded again. **Update campaign** syncs names automatically. The file name prefix is only used for ZIP and HTML exports.
    - Files are named `oct-1-autumn-edit_05b_products-2.jpg`.
 5. **Update the cloned campaign.** In Klaviyo, clone last month's campaign (it must be a **Draft** built with the **drag-and-drop editor**) and paste its link into **Update cloned campaign**.
    - The app lists every image block in the email. Tick the old images to remove. By default the header image (logo) and universal blocks (shared header/footer) are left alone.

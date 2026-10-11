@@ -66,6 +66,20 @@ klaviyoRouter.post('/images', upload.single('file'), async (req, res) => {
   res.status(201).json({ id: result.data?.id, url: a.image_url, name: a.name, size: a.size, format: a.format })
 })
 
+/** Rename an uploaded image (keeps Klaviyo's name in step with the slice name in the app). */
+klaviyoRouter.patch('/images/:id', async (req, res) => {
+  const name = String(req.body?.name ?? '').trim()
+  if (!name) throw new HttpError(400, 'name is required')
+  const id = req.params.id
+  const r = await fetchWithRetry(`${KLAVIYO_API}/images/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: headers(req, { 'content-type': 'application/vnd.api+json' }),
+    body: JSON.stringify({ data: { type: 'image', id, attributes: { name } } }),
+  })
+  const body = await readKlaviyo(r)
+  res.json({ id: body.data?.id ?? id, name: body.data?.attributes?.name ?? name })
+})
+
 klaviyoRouter.post('/templates', async (req, res) => {
   const { name, html, text, editorType } = req.body ?? {}
   if (!name || !html) throw new HttpError(400, 'name and html are required')

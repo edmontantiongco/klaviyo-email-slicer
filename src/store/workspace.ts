@@ -5,7 +5,7 @@ import { api, type SliceAnchor } from '@/lib/api'
 import { compressPool } from '@/lib/compress/pool'
 import type { CompressOptions, OutputFormat } from '@/lib/compress/types'
 import { cropImageData, fullImageData, loadBitmap } from '@/lib/image'
-import { sliceFileName } from '@/lib/naming'
+import { klaviyoFileName, klaviyoImageName } from '@/lib/naming'
 import {
   analyzeFigmaFrame,
   analyzePixels,
@@ -50,6 +50,8 @@ export interface UploadRecord {
   key: string
   status: 'uploading' | 'done' | 'error'
   fileName: string
+  /** Name the image has in Klaviyo (kept equal to the slice name). */
+  name?: string
   url?: string
   klaviyoId?: string
   error?: string
@@ -393,19 +395,36 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => {
         for (let s = queue.shift(); s; s = queue.shift()) {
           const cur = job(id)!
           const r = currentResult(cur, s, compress)!
-          const fileName = sliceFileName(cur.uploadPrefix, s, extFor(r.format))
+          const name = klaviyoImageName(cur.uploadPrefix, s)
+          const fileName = klaviyoFileName(cur.uploadPrefix, s, extFor(r.format))
           const setU = (u: UploadRecord) => patchJob(id, (x) => ({ uploads: { ...x.uploads, [s!.id]: u } }))
-          setU({ key: r.key, status: 'uploading', fileName })
+          setU({ key: r.key, status: 'uploading', fileName, name })
           try {
-            const res = await api.klaviyoUpload(r.blob!, fileName, fileName.replace(/\.[^.]+$/, ''), hideUploadsInLibrary)
-            setU({ key: r.key, status: 'done', fileName, url: res.url, klaviyoId: res.id })
+            const res = await api.klaviyoUpload(r.blob!, fileName, name, hideUploadsInLibrary)
+            setU({ key: r.key, status: 'done', fileName, name, url: res.url, klaviyoId: res.id })
           } catch (err) {
-            setU({ key: r.key, status: 'error', fileName, error: (err as Error).message })
+            setU({ key: r.key, status: 'error', fileName, name, error: (err as Error).message })
           }
         }
       }
       // The local server enforces Klaviyo's 3/s limit; two in flight keeps it busy.
       await Promise.all([worker(), worker()])
+
+      // Slices renamed after upload (or uploaded under an older naming scheme): rename them in Klaviyo
+      // instead of uploading duplicates.
+      const after = job(id)!
+      for (const s of getSlices(after.layout!)) {
+        const r = currentResult(after, s, compress)
+        const u = after.uploads[s.id]
+        const name = klaviyoImageName(after.uploadPrefix, s)
+        if (!r || !u || u.status !== 'done' || u.key !== r.key || !u.klaviyoId || u.name === name) continue
+        try {
+          await api.klaviyoRenameImage(u.klaviyoId, name)
+          patchJob(id, (x) => ({ uploads: { ...x.uploads, [s.id]: { ...x.uploads[s.id], name } } }))
+        } catch (err) {
+          patchJob(id, (x) => ({ uploads: { ...x.uploads, [s.id]: { ...x.uploads[s.id], status: 'error', error: `Rename failed: ${(err as Error).message}` } } }))
+        }
+      }
     },
   }
 })
