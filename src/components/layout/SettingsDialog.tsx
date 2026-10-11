@@ -104,7 +104,7 @@ export function SettingsDialog({ trigger }: { trigger?: React.ReactNode }) {
             </Button>
           </div>
           <p className="text-muted-foreground text-xs">
-            Scopes: Images (read + write), Templates (write).{' '}
+            Scopes: Campaigns (read + write), Templates (read + write), Images (read + write).{' '}
             <a className="inline-flex items-center gap-0.5 underline" href="https://www.klaviyo.com/settings/account/api-keys" target="_blank" rel="noreferrer">
               Manage keys <ExternalLink className="size-3" />
             </a>
@@ -165,19 +165,7 @@ export function SettingsDialog({ trigger }: { trigger?: React.ReactNode }) {
           </p>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div className="grid gap-2">
-            <Label>Template editor type</Label>
-            <Select value={s.templateEditorType} onValueChange={(v) => s.set({ templateEditorType: v as typeof s.templateEditorType })}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="CODE">Code (HTML)</SelectItem>
-                <SelectItem value="USER_DRAGGABLE">Hybrid (HTML + drag & drop)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+        <div className="grid gap-4">
           <div className="flex items-end justify-between gap-2 pb-2">
             <Label htmlFor="hide">Hide uploads from asset library</Label>
             <Switch id="hide" checked={s.hideUploadsInLibrary} onCheckedChange={(v) => s.set({ hideUploadsInLibrary: v })} />

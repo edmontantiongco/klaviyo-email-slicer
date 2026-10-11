@@ -7,14 +7,12 @@ import {
   ClipboardCopy,
   CloudUpload,
   Download,
-  ExternalLink,
   FileCode2,
   Loader2,
   RotateCw,
   XCircle,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -25,10 +23,10 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { SettingsDialog } from '@/components/layout/SettingsDialog'
+import { CampaignUpdate } from '@/components/upload/CampaignUpdate'
 import { BackgroundPicker } from '@/components/common/BackgroundPicker'
 import { useHealth } from '@/hooks/useHealth'
 import { useJobSlices } from '@/hooks/useJobStats'
-import { api } from '@/lib/api'
 import { downloadBlob, emailHtml, emailSnippet } from '@/lib/exporters'
 import { sliceFileName, sliceIndexLabel } from '@/lib/naming'
 import { cn, formatBytes, slugify } from '@/lib/utils'
@@ -57,8 +55,6 @@ export function UploadStep({ job }: { job: EmailJob }) {
   const { rows, stats } = useJobSlices(job)
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [templateName, setTemplateName] = useState(job.template?.name ?? job.name)
-  const [creating, setCreating] = useState(false)
 
   const keyReady = !!settings.klaviyoKey || !!health.data?.klaviyoKeyConfigured
   const allApproved = stats.total > 0 && stats.approved === stats.total
@@ -80,19 +76,6 @@ export function UploadStep({ job }: { job: EmailJob }) {
       else toast.success('All slices uploaded to Klaviyo')
     } finally {
       setBusy(false)
-    }
-  }
-
-  const createTemplate = async () => {
-    setCreating(true)
-    try {
-      const t = await api.klaviyoCreateTemplate(templateName.trim() || job.name, html, settings.templateEditorType)
-      patchJob(job.id, { template: { id: t.id, name: t.name, createdAt: Date.now() } })
-      toast.success('Template created in Klaviyo', { description: `${t.name} (${t.id})` })
-    } catch (e) {
-      toast.error('Template creation failed', { description: (e as Error).message })
-    } finally {
-      setCreating(false)
     }
   }
 
@@ -214,6 +197,8 @@ export function UploadStep({ job }: { job: EmailJob }) {
           </div>
         </div>
 
+        <CampaignUpdate job={job} allApproved={allApproved} keyReady={keyReady} />
+
         <Card className="gap-4">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
@@ -221,7 +206,7 @@ export function UploadStep({ job }: { job: EmailJob }) {
             </CardTitle>
             <CardDescription>
               {allUploaded
-                ? 'Uses the Klaviyo-hosted image URLs. Paste into a template, or create one directly.'
+                ? 'Uses the Klaviyo-hosted image URLs. A fallback if you ever need to paste the slices into an HTML block by hand.'
                 : 'Image URLs fill in as uploads complete (placeholders until then).'}
             </CardDescription>
           </CardHeader>
@@ -253,32 +238,6 @@ export function UploadStep({ job }: { job: EmailJob }) {
               </TabsContent>
             </Tabs>
 
-            <div className="flex flex-wrap items-end gap-3 rounded-lg border p-3">
-              <div className="grid min-w-60 flex-1 gap-1.5">
-                <Label htmlFor="tpl-name">Klaviyo template name</Label>
-                <Input id="tpl-name" value={templateName} onChange={(e) => setTemplateName(e.target.value)} />
-              </div>
-              <Button data-testid="create-template" disabled={!allUploaded || creating || !keyReady} onClick={createTemplate}>
-                {creating && <Loader2 className="animate-spin" />}
-                Create {settings.templateEditorType === 'CODE' ? 'code' : 'hybrid'} template
-              </Button>
-              {job.template && (
-                <div className="flex w-full items-center gap-2 text-sm">
-                  <Badge variant="success">Created</Badge>
-                  <span>
-                    {job.template.name} · <code className="text-xs">{job.template.id}</code>
-                  </span>
-                  <a
-                    className="text-muted-foreground ml-auto inline-flex items-center gap-1 text-xs underline"
-                    href="https://www.klaviyo.com/email-templates"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Open Klaviyo templates <ExternalLink className="size-3" />
-                  </a>
-                </div>
-              )}
-            </div>
           </CardContent>
         </Card>
       </div>

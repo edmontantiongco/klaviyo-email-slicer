@@ -4,7 +4,7 @@ This app runs on your own machine. It takes a month of email designs from Figma 
 
 ```
 Figma section ─► detect email frames ─► layer-aware auto-slice ─► ✋ human review
-           ─► MozJPEG/OxiPNG compression ─► ✋ approval gate ─► Klaviyo upload ─► HTML / template
+           ─► MozJPEG/OxiPNG compression ─► ✋ approval gate ─► Klaviyo upload ─► update cloned campaign
 ```
 
 ## Quick start
@@ -24,7 +24,7 @@ Run `npm start` instead to build once and serve everything from http://localhost
 | Where | What | Scopes |
 |---|---|---|
 | Figma → Settings → Security → Personal access tokens | `FIGMA_TOKEN` | File content: **Read-only** |
-| Klaviyo → Settings → API keys → Create private key | `KLAVIYO_PRIVATE_KEY` | Images **Read + Write**, Templates **Write** |
+| Klaviyo → Settings → API keys → Create private key | `KLAVIYO_PRIVATE_KEY` | Campaigns **Read + Write**, Templates **Read + Write**, Images **Read + Write** |
 
 You can put keys in `.env` or paste them into **Settings** (⚙). Keys entered in Settings are stored in your browser and are only sent to the local API server. Klaviyo private keys can't be used directly from a browser, so the small Express server (`server/`) makes those calls for you.
 
@@ -46,8 +46,15 @@ You can put keys in `.env` or paste them into **Settings** (⚙). Keys entered i
 4. **Upload.** Pre-flight checks cover approvals, size budget, missing links or alt text, and the API key. Nothing uploads until **every slice is approved**.
    - The server paces uploads to stay within Klaviyo's limits (3/s, 100/min).
    - Files are named `oct-1-autumn-edit_05b_products-2.jpg`.
-   - When uploads finish, copy the paste-ready HTML (full template or rows only), or click **Create template** to make a Klaviyo template directly.
-   - A Klaviyo footer (`{% unsubscribe %}` and organisation address) is added by default. You can turn it off in Settings.
+5. **Update the cloned campaign.** In Klaviyo, clone last month's campaign (it must be a **Draft** built with the **drag-and-drop editor**) and paste its link into **Update cloned campaign**.
+   - The app lists every image block in the email. Tick the old images to remove. By default the header image (logo) and universal blocks (shared header/footer) are left alone.
+   - **Remove from campaign** deletes the ticked images from the draft right away (after a confirm), without adding anything. The app remembers where they were and shows it ("The slices will go where it was: Section 2 · Row 1"). **Update campaign** then puts the slices in that spot. Ticked images always take priority over a remembered spot, and **Forget** clears it.
+   - **Preview changes** shows exactly what will happen: how many images are removed, how many slice rows are inserted, and where. This step is required.
+   - **Update campaign** uploads any slices not yet uploaded, then swaps them in. The slices go where the first removed image was, as native drag-and-drop **image blocks** with your links and alt text. Text, buttons, header, footer, subject and audience are untouched, and the email **stays in the drag-and-drop editor**.
+   - Multi-column rows use Klaviyo's column presets (2–4 equal columns, 25/75, 33/67, 25/50/25 …) when the slice widths match within ~0.5%. Otherwise the row becomes a drag-and-drop **HTML block** with exact widths, so nothing gets distorted.
+   - Nothing is scheduled or sent, and no copy of the old content is kept, so the change can't be undone from the app. Open the campaign in Klaviyo, check it, and send a test.
+   - If Klaviyo won't let the app edit the email's content directly, the app makes a temporary drag-and-drop template, assigns it to the campaign's email (Klaviyo copies it in), and deletes the temporary template. The result is the same.
+   - The paste-ready HTML (full template or rows only) is still there as a manual fallback.
 
 The header's ⬇ button exports a **ZIP** with the images, `index.html` and `manifest.json` (coordinates, sizes, links, alt text). Your workspace is saved in IndexedDB, so a page refresh doesn't lose any work.
 

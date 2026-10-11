@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { toast } from 'sonner'
 import { del, get as idbGet, set as idbSet, keys as idbKeys } from 'idb-keyval'
-import { api } from '@/lib/api'
+import { api, type SliceAnchor } from '@/lib/api'
 import { compressPool } from '@/lib/compress/pool'
 import type { CompressOptions, OutputFormat } from '@/lib/compress/types'
 import { cropImageData, fullImageData, loadBitmap } from '@/lib/image'
@@ -80,6 +80,24 @@ export interface EmailJob {
   uploads: Record<string, UploadRecord>
   uploadPrefix: string
   template?: { id: string; name: string; createdAt: number }
+  /** Cloned Klaviyo campaign whose images get replaced by this job's slices. */
+  campaign?: CampaignLink
+}
+
+export interface CampaignLink {
+  url: string
+  campaignId?: string
+  campaignName?: string
+  /** Template `updated` timestamp when loaded/last written (detects edits made in Klaviyo meanwhile). */
+  templateUpdated?: string | null
+  /** Image block keys the user chose to replace. */
+  selectedKeys?: string[]
+  lastUpdate?: { at: number; removed: number; inserted: number; method: 'update' | 'assign' }
+  /**
+   * Set after "Remove from campaign": where the removed images were, so "Update campaign"
+   * can insert the slices there. Valid only while the email is unchanged (templateUpdated).
+   */
+  placement?: { anchor: SliceAnchor; removed: number; at: number; templateUpdated: string | null }
 }
 
 interface WorkspaceState {

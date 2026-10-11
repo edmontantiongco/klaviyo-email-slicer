@@ -53,6 +53,69 @@ export interface FigmaPagesResponse {
   pages: { id: string; name: string; children: { id: string; name: string; type: string; width: number; height: number }[] }[]
 }
 
+export interface CampaignImage {
+  key: string
+  blockId?: string
+  section: number
+  row: number
+  column: number
+  block: number
+  columnsInRow: number
+  src: string
+  href: string
+  alt: string
+  width?: number
+  universal: boolean
+}
+
+export interface CampaignInfo {
+  campaign: { id: string; name: string; status: string; editable: boolean }
+  message: { id: string; subject: string; previewText: string; label: string }
+  template: { id: string; name: string; editorType: string; updated: string | null }
+  summary: { width: number; sections: number; blocks: number; images: CampaignImage[]; blockTypes: Record<string, number> } | null
+}
+
+export interface CampaignSliceRow {
+  cells: { src: string; assetId?: string; href: string; alt: string; fraction: number }[]
+}
+
+/** Where the slices go after images were removed on their own (returned by the remove call). */
+export interface SliceAnchor {
+  section: number
+  row: number
+  newSection: boolean
+  sectionData?: Record<string, unknown>
+  label: string
+}
+
+export interface CampaignRemoveResult {
+  dryRun: boolean
+  removed: number
+  anchor: SliceAnchor
+  warnings: string[]
+  method?: 'update' | 'assign'
+  templateId?: string
+  templateUpdated?: string | null
+  after?: CampaignInfo['summary']
+}
+
+export interface CampaignReplaceResult {
+  dryRun: boolean
+  removed: number
+  inserted: number
+  rows: { index: number; cells: number; mode: 'image' | 'columns' | 'html'; columnLayout?: string }[]
+  insertedAt: { section: number; row: number }
+  contentWidth: number
+  warnings: string[]
+  method?: 'update' | 'assign'
+  templateId?: string
+  templateUpdated?: string | null
+  after?: CampaignInfo['summary']
+}
+
+const post = <T>(path: string, body: unknown) =>
+  json<T>(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+
 export const api = {
   health: () => json<HealthResponse>('/api/health'),
 
@@ -90,4 +153,19 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name, html, editorType }),
     }),
+
+  klaviyoResolveCampaign: (url: string) => post<CampaignInfo>('/api/klaviyo/campaign/resolve', { url }),
+
+  klaviyoReplaceCampaignImages: (body: {
+    campaignId: string
+    removeKeys: string[]
+    rows: CampaignSliceRow[]
+    dryRun: boolean
+    templateUpdated?: string | null
+    /** Used when no images are selected: insert where earlier-removed images were. */
+    anchor?: SliceAnchor
+  }) => post<CampaignReplaceResult>('/api/klaviyo/campaign/replace', body),
+
+  klaviyoRemoveCampaignImages: (body: { campaignId: string; removeKeys: string[]; dryRun: boolean; templateUpdated?: string | null }) =>
+    post<CampaignRemoveResult>('/api/klaviyo/campaign/remove', body),
 }
