@@ -55,7 +55,6 @@ You can put keys in `.env` or paste them into **Settings** (⚙). Keys entered i
    - Multi-column rows use Klaviyo's column presets (2–4 equal columns, 25/75, 33/67, 25/50/25 …) when the slice widths match within ~0.5%. Otherwise the row becomes a drag-and-drop **HTML block** with exact widths, so nothing gets distorted.
    - Nothing is scheduled or sent, and no copy of the old content is kept, so the change can't be undone from the app. Open the campaign in Klaviyo, check it, and send a test.
    - If Klaviyo won't let the app edit the email's content directly, the app makes a temporary drag-and-drop template, assigns it to the campaign's email (Klaviyo copies it in), and deletes the temporary template. The result is the same.
-   - The paste-ready HTML (full template or rows only) is still there as a manual fallback.
 
 The header's ⬇ button exports a **ZIP** with the images, `index.html` and `manifest.json` (coordinates, sizes, links, alt text). Your workspace is saved in IndexedDB, so a page refresh doesn't lose any work.
 

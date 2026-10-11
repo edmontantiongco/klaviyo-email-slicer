@@ -1,13 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
   CircleDashed,
-  ClipboardCopy,
   CloudUpload,
-  Download,
-  FileCode2,
   Loader2,
   RotateCw,
   XCircle,
@@ -20,14 +17,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Textarea } from '@/components/ui/textarea'
 import { SettingsDialog } from '@/components/layout/SettingsDialog'
 import { CampaignUpdate } from '@/components/upload/CampaignUpdate'
-import { BackgroundPicker } from '@/components/common/BackgroundPicker'
 import { useHealth } from '@/hooks/useHealth'
 import { useJobSlices } from '@/hooks/useJobStats'
-import { downloadBlob, emailHtml, emailSnippet } from '@/lib/exporters'
 import { klaviyoImageName, sliceFileName, sliceIndexLabel } from '@/lib/naming'
 import { cn, formatBytes, slugify } from '@/lib/utils'
 import { useSettings } from '@/store/settings'
@@ -61,9 +54,6 @@ export function UploadStep({ job }: { job: EmailJob }) {
   const allUploaded = stats.total > 0 && stats.uploaded === stats.total
   const pending = stats.total - stats.uploaded
   const uploading = rows.some((r) => r.upload?.status === 'uploading')
-
-  const html = useMemo(() => emailHtml(job, 'klaviyo'), [job])
-  const snippet = useMemo(() => emailSnippet(job, 'klaviyo'), [job])
 
   const start = async () => {
     setConfirming(false)
@@ -204,48 +194,6 @@ export function UploadStep({ job }: { job: EmailJob }) {
         </div>
 
         <CampaignUpdate job={job} allApproved={allApproved} keyReady={keyReady} />
-
-        <Card className="gap-4">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <FileCode2 className="size-4" /> Email HTML
-            </CardTitle>
-            <CardDescription>
-              {allUploaded
-                ? 'Uses the Klaviyo-hosted image URLs. A fallback if you ever need to paste the slices into an HTML block by hand.'
-                : 'Image URLs fill in as uploads complete (placeholders until then).'}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4">
-            <Tabs defaultValue="full">
-              <div className="flex flex-wrap items-center gap-2">
-                <TabsList>
-                  <TabsTrigger value="full">Full template</TabsTrigger>
-                  <TabsTrigger value="snippet">Rows only</TabsTrigger>
-                </TabsList>
-                <BackgroundPicker job={job} />
-                <div className="ml-auto flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => copy(html, 'Template HTML')}>
-                    <ClipboardCopy /> Copy full
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => copy(snippet, 'Rows HTML')}>
-                    <ClipboardCopy /> Copy rows
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => downloadBlob(new Blob([html], { type: 'text/html' }), `${job.uploadPrefix}.html`)}>
-                    <Download /> .html
-                  </Button>
-                </div>
-              </div>
-              <TabsContent value="full">
-                <Textarea readOnly value={html} className="h-64 font-mono text-xs" data-testid="html-output" />
-              </TabsContent>
-              <TabsContent value="snippet">
-                <Textarea readOnly value={snippet} className="h-64 font-mono text-xs" />
-              </TabsContent>
-            </Tabs>
-
-          </CardContent>
-        </Card>
       </div>
 
       <Dialog open={confirming} onOpenChange={setConfirming}>
