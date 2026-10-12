@@ -1,20 +1,15 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
   CircleDashed,
-  ClipboardCopy,
   CloudUpload,
-  Download,
-  ExternalLink,
-  FileCode2,
   Loader2,
   RotateCw,
   XCircle,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -22,15 +17,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Textarea } from '@/components/ui/textarea'
 import { SettingsDialog } from '@/components/layout/SettingsDialog'
-import { BackgroundPicker } from '@/components/common/BackgroundPicker'
+import { CampaignUpdate } from '@/components/upload/CampaignUpdate'
+import { RefreshFromFigmaButton } from '@/components/common/FigmaSync'
 import { useHealth } from '@/hooks/useHealth'
 import { useJobSlices } from '@/hooks/useJobStats'
-import { api } from '@/lib/api'
-import { downloadBlob, emailHtml, emailSnippet } from '@/lib/exporters'
-import { sliceFileName, sliceIndexLabel } from '@/lib/naming'
+import { klaviyoImageName, sliceFileName, sliceIndexLabel } from '@/lib/naming'
 import { cn, formatBytes, slugify } from '@/lib/utils'
 import { useSettings } from '@/store/settings'
 import { useWorkspace, type EmailJob } from '@/store/workspace'
@@ -57,17 +49,12 @@ export function UploadStep({ job }: { job: EmailJob }) {
   const { rows, stats } = useJobSlices(job)
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [templateName, setTemplateName] = useState(job.template?.name ?? job.name)
-  const [creating, setCreating] = useState(false)
 
   const keyReady = !!settings.klaviyoKey || !!health.data?.klaviyoKeyConfigured
   const allApproved = stats.total > 0 && stats.approved === stats.total
   const allUploaded = stats.total > 0 && stats.uploaded === stats.total
   const pending = stats.total - stats.uploaded
   const uploading = rows.some((r) => r.upload?.status === 'uploading')
-
-  const html = useMemo(() => emailHtml(job, 'klaviyo'), [job])
-  const snippet = useMemo(() => emailSnippet(job, 'klaviyo'), [job])
 
   const start = async () => {
     setConfirming(false)
@@ -83,19 +70,6 @@ export function UploadStep({ job }: { job: EmailJob }) {
     }
   }
 
-  const createTemplate = async () => {
-    setCreating(true)
-    try {
-      const t = await api.klaviyoCreateTemplate(templateName.trim() || job.name, html, settings.templateEditorType)
-      patchJob(job.id, { template: { id: t.id, name: t.name, createdAt: Date.now() } })
-      toast.success('Template created in Klaviyo', { description: `${t.name} (${t.id})` })
-    } catch (e) {
-      toast.error('Template creation failed', { description: (e as Error).message })
-    } finally {
-      setCreating(false)
-    }
-  }
-
   return (
     <ScrollArea className="h-full">
       <div className="mx-auto grid max-w-6xl gap-6 p-6">
@@ -104,6 +78,7 @@ export function UploadStep({ job }: { job: EmailJob }) {
             <ArrowLeft /> Review
           </Button>
           <h1 className="text-xl font-semibold tracking-tight">Upload “{job.name}” to Klaviyo</h1>
+          <RefreshFromFigmaButton job={job} className="ml-auto" />
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
@@ -118,7 +93,9 @@ export function UploadStep({ job }: { job: EmailJob }) {
               {(busy || uploading) && <Progress value={(stats.uploaded / Math.max(1, stats.total)) * 100} />}
               <div className="divide-y rounded-md border" data-testid="upload-list">
                 {rows.map(({ slice, result, upload }) => {
-                  const fileName = upload?.fileName ?? sliceFileName(job.uploadPrefix, slice, result?.format === 'png' ? 'png' : 'jpg')
+                  // Shown exactly as it will be (or is) named in Klaviyo.
+                  const fileName = klaviyoImageName(job.uploadPrefix, slice)
+                  const renamePending = upload?.status === 'done' && upload.name !== fileName
                   return (
                     <div key={slice.id} className="flex items-center gap-3 p-2">
                       <div className="checkerboard flex h-10 w-16 shrink-0 items-center justify-center overflow-hidden rounded border">
@@ -127,7 +104,8 @@ export function UploadStep({ job }: { job: EmailJob }) {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <span className="text-muted-foreground font-mono text-xs">{sliceIndexLabel(slice)}</span>
-                          <span className="truncate font-mono text-xs">{fileName}</span>
+                          <span className="truncate text-xs font-medium" title="Name in Klaviyo">{fileName}</span>
+                          {renamePending && <span className="shrink-0 text-[11px] text-amber-600 dark:text-amber-400">name changed — sync to Klaviyo</span>}
                         </div>
                         {upload?.status === 'done' && upload.url ? (
                           <button className="text-muted-foreground hover:text-foreground block max-w-full truncate text-left text-xs" onClick={() => copy(upload.url!, 'Image URL')}>
@@ -184,7 +162,7 @@ export function UploadStep({ job }: { job: EmailJob }) {
                   </Check>
                 </ul>
                 <div className="grid gap-1.5">
-                  <Label htmlFor="prefix">File name prefix</Label>
+                  <Label htmlFor="prefix">ZIP / HTML file name prefix</Label>
                   <Input
                     id="prefix"
                     value={job.uploadPrefix}
@@ -192,17 +170,20 @@ export function UploadStep({ job }: { job: EmailJob }) {
                     disabled={busy}
                   />
                   <p className="text-muted-foreground text-xs">
-                    e.g. <code>{rows[0] ? sliceFileName(job.uploadPrefix, rows[0].slice, 'jpg') : '—'}</code>
+                    e.g. <code>{rows[0] ? sliceFileName(job.uploadPrefix, rows[0].slice, 'jpg') : '—'}</code>. In Klaviyo, each image is named exactly
+                    like its slice (the <b>Name</b> field), e.g. <b>{rows[0] ? klaviyoImageName(job.uploadPrefix, rows[0].slice) : '—'}</b>.
                   </p>
                 </div>
                 <Button
                   data-testid="upload-start"
                   size="lg"
-                  disabled={!allApproved || !keyReady || busy || allUploaded}
-                  onClick={() => setConfirming(true)}
+                  disabled={!allApproved || !keyReady || busy || (allUploaded && !stats.renamePending)}
+                  onClick={() => (allUploaded ? start() : setConfirming(true))}
                 >
-                  {busy ? <Loader2 className="animate-spin" /> : allUploaded ? <CheckCircle2 /> : stats.uploadErrors ? <RotateCw /> : <CloudUpload />}
-                  {allUploaded
+                  {busy ? <Loader2 className="animate-spin" /> : allUploaded && !stats.renamePending ? <CheckCircle2 /> : stats.uploadErrors ? <RotateCw /> : <CloudUpload />}
+                  {allUploaded && stats.renamePending
+                    ? `Update ${stats.renamePending} name${stats.renamePending > 1 ? 's' : ''} in Klaviyo`
+                    : allUploaded
                     ? 'Uploaded'
                     : stats.uploadErrors
                       ? `Retry ${pending} upload${pending > 1 ? 's' : ''}`
@@ -214,73 +195,7 @@ export function UploadStep({ job }: { job: EmailJob }) {
           </div>
         </div>
 
-        <Card className="gap-4">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <FileCode2 className="size-4" /> Email HTML
-            </CardTitle>
-            <CardDescription>
-              {allUploaded
-                ? 'Uses the Klaviyo-hosted image URLs. Paste into a template, or create one directly.'
-                : 'Image URLs fill in as uploads complete (placeholders until then).'}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4">
-            <Tabs defaultValue="full">
-              <div className="flex flex-wrap items-center gap-2">
-                <TabsList>
-                  <TabsTrigger value="full">Full template</TabsTrigger>
-                  <TabsTrigger value="snippet">Rows only</TabsTrigger>
-                </TabsList>
-                <BackgroundPicker job={job} />
-                <div className="ml-auto flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => copy(html, 'Template HTML')}>
-                    <ClipboardCopy /> Copy full
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => copy(snippet, 'Rows HTML')}>
-                    <ClipboardCopy /> Copy rows
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => downloadBlob(new Blob([html], { type: 'text/html' }), `${job.uploadPrefix}.html`)}>
-                    <Download /> .html
-                  </Button>
-                </div>
-              </div>
-              <TabsContent value="full">
-                <Textarea readOnly value={html} className="h-64 font-mono text-xs" data-testid="html-output" />
-              </TabsContent>
-              <TabsContent value="snippet">
-                <Textarea readOnly value={snippet} className="h-64 font-mono text-xs" />
-              </TabsContent>
-            </Tabs>
-
-            <div className="flex flex-wrap items-end gap-3 rounded-lg border p-3">
-              <div className="grid min-w-60 flex-1 gap-1.5">
-                <Label htmlFor="tpl-name">Klaviyo template name</Label>
-                <Input id="tpl-name" value={templateName} onChange={(e) => setTemplateName(e.target.value)} />
-              </div>
-              <Button data-testid="create-template" disabled={!allUploaded || creating || !keyReady} onClick={createTemplate}>
-                {creating && <Loader2 className="animate-spin" />}
-                Create {settings.templateEditorType === 'CODE' ? 'code' : 'hybrid'} template
-              </Button>
-              {job.template && (
-                <div className="flex w-full items-center gap-2 text-sm">
-                  <Badge variant="success">Created</Badge>
-                  <span>
-                    {job.template.name} · <code className="text-xs">{job.template.id}</code>
-                  </span>
-                  <a
-                    className="text-muted-foreground ml-auto inline-flex items-center gap-1 text-xs underline"
-                    href="https://www.klaviyo.com/email-templates"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Open Klaviyo templates <ExternalLink className="size-3" />
-                  </a>
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+        <CampaignUpdate job={job} allApproved={allApproved} keyReady={keyReady} />
       </div>
 
       <Dialog open={confirming} onOpenChange={setConfirming}>
@@ -288,8 +203,9 @@ export function UploadStep({ job }: { job: EmailJob }) {
           <DialogHeader>
             <DialogTitle>Upload {pending} images to Klaviyo?</DialogTitle>
             <DialogDescription>
-              They'll be added to your Klaviyo image library{settings.hideUploadsInLibrary ? ' (hidden)' : ''} as{' '}
-              <code>{job.uploadPrefix}_…</code>. You approved every slice; uploads can't be undone from here.
+              They'll be added to your Klaviyo image library{settings.hideUploadsInLibrary ? ' (hidden)' : ''} named
+              after each slice's <b>Name</b> (e.g. “{rows[0] ? klaviyoImageName(job.uploadPrefix, rows[0].slice) : ''}”). You approved every slice; uploads
+              can't be undone from here.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

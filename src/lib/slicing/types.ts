@@ -39,6 +39,8 @@ export interface LayoutAnalysis {
   sections: Section[]
   /** Preferred horizontal cut positions (section edges / colour changes). */
   edges: number[]
+  /** Figma Slice layers on the frame (image px). When present they define the slices. */
+  figmaSlices?: import('./figmaSlices').FigmaSlice[]
 }
 
 export interface AutoSliceOptions {

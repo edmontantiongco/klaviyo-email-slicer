@@ -3,20 +3,20 @@ import multer from 'multer'
 import { HttpError, fetchWithRetry } from './http.ts'
 import { createLimiter } from './limiter.ts'
 
-const KLAVIYO_API = process.env.KLAVIYO_API_BASE || 'https://a.klaviyo.com/api'
+export const KLAVIYO_API = process.env.KLAVIYO_API_BASE || 'https://a.klaviyo.com/api'
 export const KLAVIYO_REVISION = process.env.KLAVIYO_REVISION || '2026-07-15'
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024 // Klaviyo hard limit
 
 // Klaviyo image upload limits: burst 3/s, steady 100/m (daily 500/d).
 const uploadLimiter = createLimiter({ perSecond: 3, perMinute: 100 })
 
-function apiKey(req: Request): string {
+export function apiKey(req: Request): string {
   const k = (req.header('x-klaviyo-key') || process.env.KLAVIYO_PRIVATE_KEY || '').trim()
   if (!k) throw new HttpError(401, 'No Klaviyo private API key configured. Add KLAVIYO_PRIVATE_KEY to .env or set it in Settings.')
   return k
 }
 
-function headers(req: Request, extra: Record<string, string> = {}) {
+export function headers(req: Request, extra: Record<string, string> = {}) {
   return {
     Authorization: `Klaviyo-API-Key ${apiKey(req)}`,
     revision: KLAVIYO_REVISION,
@@ -25,7 +25,7 @@ function headers(req: Request, extra: Record<string, string> = {}) {
   }
 }
 
-async function readKlaviyo(res: Response) {
+export async function readKlaviyo(res: Response) {
   const body = (await res.json().catch(() => ({}))) as any
   if (!res.ok) {
     const first = body?.errors?.[0]
@@ -39,7 +39,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX
 
 export const klaviyoRouter = Router()
 
-/** Validates the key by listing a single image (needs images:read). */
+/** Validates the key by listing a single image (needs images:read). Campaign updates also need campaigns:read/write + templates:read/write. */
 klaviyoRouter.get('/test', async (req, res) => {
   const r = await fetchWithRetry(`${KLAVIYO_API}/images?page[size]=1`, { headers: headers(req) })
   await readKlaviyo(r)
@@ -64,6 +64,20 @@ klaviyoRouter.post('/images', upload.single('file'), async (req, res) => {
 
   const a = result.data?.attributes ?? {}
   res.status(201).json({ id: result.data?.id, url: a.image_url, name: a.name, size: a.size, format: a.format })
+})
+
+/** Rename an uploaded image (keeps Klaviyo's name in step with the slice name in the app). */
+klaviyoRouter.patch('/images/:id', async (req, res) => {
+  const name = String(req.body?.name ?? '').trim()
+  if (!name) throw new HttpError(400, 'name is required')
+  const id = req.params.id
+  const r = await fetchWithRetry(`${KLAVIYO_API}/images/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: headers(req, { 'content-type': 'application/vnd.api+json' }),
+    body: JSON.stringify({ data: { type: 'image', id, attributes: { name } } }),
+  })
+  const body = await readKlaviyo(r)
+  res.json({ id: body.data?.id ?? id, name: body.data?.attributes?.name ?? name })
 })
 
 klaviyoRouter.post('/templates', async (req, res) => {

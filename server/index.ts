@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import express, { type NextFunction, type Request, type Response } from 'express'
 import { figmaRouter } from './figma.ts'
 import { klaviyoRouter, KLAVIYO_REVISION } from './klaviyo.ts'
+import { campaignRouter } from './campaign.ts'
 import { HttpError } from './http.ts'
 
 const PORT = Number(process.env.PORT || 8787)
@@ -21,6 +22,7 @@ app.get('/api/health', (_req, res) => {
 })
 
 app.use('/api/figma', figmaRouter)
+app.use('/api/klaviyo/campaign', campaignRouter)
 app.use('/api/klaviyo', klaviyoRouter)
 
 app.use('/api', (_req, res) => {

@@ -8,6 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { moveColCut, moveRowCut, removeColCut, removeRowCut, validateLayout } from '@/lib/slicing'
 import { cn } from '@/lib/utils'
 import { useWorkspace, type EmailJob } from '@/store/workspace'
+import { FigmaSliceBanner, RefreshFromFigmaButton } from '@/components/common/FigmaSync'
 import { SliceCanvas } from './SliceCanvas'
 import { SliceInspector } from './SliceInspector'
 import type { EditorMode, Selection, Zoom } from './types'
@@ -139,14 +140,23 @@ export function SliceStep({ job }: { job: EmailJob }) {
             </SelectContent>
           </Select>
           {job.source.kind === 'figma' && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button size="icon-sm" variant="ghost" onClick={() => reloadJob(job.id)}>
-                  <RotateCw />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Re-fetch from Figma (discards edits)</TooltipContent>
-            </Tooltip>
+            <>
+              <RefreshFromFigmaButton job={job} />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    onClick={() => {
+                      if (confirm('Start over from Figma? This discards compression, approvals and uploads for this email.')) reloadJob(job.id)
+                    }}
+                  >
+                    <RotateCw />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Start over from Figma (discards everything)</TooltipContent>
+              </Tooltip>
+            </>
           )}
 
           <div className="ml-auto flex items-center gap-3">
@@ -166,6 +176,7 @@ export function SliceStep({ job }: { job: EmailJob }) {
             </Button>
           </div>
         </div>
+        <FigmaSliceBanner job={job} />
         <SliceCanvas
           job={job}
           layout={layout}

@@ -106,6 +106,11 @@ export function OptimizeStep({ job }: { job: EmailJob }) {
                         <div className="flex items-center gap-2">
                           <span className="text-muted-foreground font-mono text-xs">{sliceIndexLabel(slice)}</span>
                           <span className="min-w-0 flex-1 truncate text-sm font-medium">{slice.meta.name}</span>
+                          {job.revisions?.[slice.id] && (
+                            <Badge variant="warning" data-testid="revised-badge" title="Changed in Figma since it was uploaded">
+                              Revised in Figma
+                            </Badge>
+                          )}
                         </div>
                         <div className="flex flex-wrap items-center gap-1.5">
                           <Badge variant="outline" className="font-mono">
