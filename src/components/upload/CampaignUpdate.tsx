@@ -68,7 +68,7 @@ export function CampaignUpdate({ job, allApproved, keyReady }: Props) {
       saveLink({ url: url.trim(), campaignId: res.campaign.id, campaignName: res.campaign.name, templateUpdated: res.template.updated, selectedKeys: sel })
     } catch (e) {
       setInfo(null)
-      toast.error('Could not load the campaign', { description: (e as Error).message })
+      toast.error('Could not load the campaign', { description: (e as Error).message, duration: 30000, closeButton: true })
     } finally {
       setBusy(null)
     }

@@ -210,6 +210,17 @@ describe('swapImages (revised in Figma)', () => {
   })
 })
 
+describe('Klaviyo definition errors', () => {
+  it('turns the header/logo error into fix steps', async () => {
+    const { definitionHelp } = await import('./campaign.ts')
+    const msg = definitionHelp("Unprocessable Content.: Failed to load definition for template QVWHgA: Header blocks with 'links' desktop layout must not include a logo subblock @ $")
+    expect(msg).toContain("“Header blocks with 'links' desktop layout must not include a logo subblock”")
+    expect(msg).toMatch(/Desktop layout to one that shows the logo \(Centered, Inline or Stacked\)/)
+    expect(msg).toMatch(/remove the logo/)
+    expect(definitionHelp('Bad: Failed to load definition for template X: Something else @ $')).toMatch(/Klaviyo says: “Something else”/)
+  })
+})
+
 describe('helpers', () => {
   it('strips ids for template creation', () => {
     const s = JSON.stringify(stripIds(fixture()))

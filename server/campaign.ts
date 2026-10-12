@@ -91,6 +91,7 @@ export async function loadCampaign(req: Request, input: { url?: string; campaign
   try {
     t = (await kGet(req, `/templates/${templateId}?additional-fields[template]=definition`)).data
   } catch (e) {
+    if (e instanceof HttpError && /failed to load definition/i.test(e.message)) throw new HttpError(422, definitionHelp(e.message))
     scopeHint(e)
   }
   const ta = t!.attributes ?? {}
@@ -100,6 +101,28 @@ export async function loadCampaign(req: Request, input: { url?: string; campaign
     template: { id: t!.id, name: ta.name ?? '', editorType: ta.editor_type ?? 'UNKNOWN', updated: ta.updated ?? null },
     definition: ta.definition ?? null,
   }
+}
+
+/**
+ * Klaviyo sometimes can't export an email's drag-and-drop layout because one block has a setting
+ * its API doesn't accept (the editor tolerates it). Explain how to fix it in Klaviyo.
+ */
+export function definitionHelp(raw: string): string {
+  const said = raw.replace(/^[^:]*:\s*/, '').replace(/^Failed to load definition for template \w+:\s*/i, '').replace(/\s*@\s*\$\s*$/, '').trim()
+  const tail = ' Save, then click Load campaign again. Tip: make the same fix in the campaign or template you clone from (or the universal header block), so future clones load too.'
+  if (/header block/i.test(said) && /logo/i.test(said)) {
+    return (
+      `Klaviyo can't export this email's drag-and-drop layout, so the app can't edit it. Klaviyo says: “${said}”. ` +
+      'Fix it in Klaviyo: open the email, click the Header block (the logo + links bar) and either set its Desktop layout to one that shows the logo ' +
+      '(Centered, Inline or Stacked), or remove the logo from it if the header should be links only.' +
+      tail
+    )
+  }
+  return (
+    `Klaviyo can't export this email's drag-and-drop layout, so the app can't edit it. Klaviyo says: “${said}”. ` +
+    'Usually one block has a setting Klaviyo’s API doesn’t accept. Open the email in Klaviyo, adjust or re-add the block it mentions.' +
+    tail
+  )
 }
 
 function assertEditable(l: Loaded) {
