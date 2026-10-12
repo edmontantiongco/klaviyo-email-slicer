@@ -32,9 +32,9 @@ export function AppHeader() {
     {
       id: 'upload',
       label: 'Upload',
-      enabled: ready && allApproved,
+      enabled: ready && stats.approved > 0,
       done: stats.total > 0 && stats.uploaded === stats.total,
-      hint: 'Approve every slice first',
+      hint: 'Approve at least one slice first',
     },
   ]
 

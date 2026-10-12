@@ -28,6 +28,8 @@ export function useJobSlices(job: EmailJob | undefined) {
       overBudget: done.filter((r) => !r.result!.withinBudget).length,
       approved: done.filter((r) => r.result!.approved).length,
       uploaded: rows.filter((r) => r.upload?.status === 'done').length,
+      /** Approved but not uploaded yet (what Upload sends). */
+      toUpload: done.filter((r) => r.result!.approved && r.upload?.status !== 'done').length,
       uploadErrors: rows.filter((r) => r.upload?.status === 'error').length,
       /** Uploaded, but the Klaviyo name no longer matches the slice name. */
       renamePending: rows.filter((r) => r.upload?.status === 'done' && r.upload.name !== klaviyoImageName(job.uploadPrefix, r.slice)).length,
@@ -40,5 +42,5 @@ export function useJobSlices(job: EmailJob | undefined) {
 }
 
 function emptyStats() {
-  return { total: 0, done: 0, working: 0, errors: 0, overBudget: 0, approved: 0, uploaded: 0, uploadErrors: 0, renamePending: 0, bytes: 0, missingLinks: 0, missingAlt: 0 }
+  return { total: 0, done: 0, working: 0, errors: 0, overBudget: 0, approved: 0, uploaded: 0, toUpload: 0, uploadErrors: 0, renamePending: 0, bytes: 0, missingLinks: 0, missingAlt: 0 }
 }

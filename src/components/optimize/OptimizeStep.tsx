@@ -64,7 +64,7 @@ export function OptimizeStep({ job }: { job: EmailJob }) {
                   {formatBytes(stats.bytes)} total · {stats.approved}/{stats.total} approved
                 </span>
               )}
-              <Button data-testid="to-upload" disabled={!allApproved} onClick={() => setStep(job.id, 'upload')}>
+              <Button data-testid="to-upload" disabled={!stats.approved} onClick={() => setStep(job.id, 'upload')}>
                 Upload <ArrowRight />
               </Button>
             </div>

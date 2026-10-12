@@ -53,7 +53,12 @@ export function UploadStep({ job }: { job: EmailJob }) {
   const keyReady = !!settings.klaviyoKey || !!health.data?.klaviyoKeyConfigured
   const allApproved = stats.total > 0 && stats.approved === stats.total
   const allUploaded = stats.total > 0 && stats.uploaded === stats.total
-  const pending = stats.total - stats.uploaded
+  // Only approved slices upload; unapproved ones wait until they're approved.
+  const pending = stats.toUpload
+  const nothingToUpload = pending === 0
+  // Unapproved slices aren't uploaded, so they're left out of the list (already-uploaded ones stay).
+  const shown = rows.filter((r) => r.upload || r.result?.approved)
+  const hidden = rows.length - shown.length
   const uploading = rows.some((r) => r.upload?.status === 'uploading')
 
   const start = async () => {
@@ -64,7 +69,7 @@ export function UploadStep({ job }: { job: EmailJob }) {
       const after = useWorkspace.getState().jobs.find((j) => j.id === job.id)
       const failed = Object.values(after?.uploads ?? {}).filter((u) => u.status === 'error').length
       if (failed) toast.error(`${failed} upload${failed > 1 ? 's' : ''} failed`, { description: 'Check the list below and retry.' })
-      else toast.success('All slices uploaded to Klaviyo')
+      else toast.success(allApproved ? 'All slices uploaded to Klaviyo' : 'Approved slices uploaded to Klaviyo', allApproved ? undefined : { description: `${stats.total - stats.approved} unapproved slice${stats.total - stats.approved > 1 ? 's' : ''} not uploaded yet.` })
     } finally {
       setBusy(false)
     }
@@ -86,13 +91,14 @@ export function UploadStep({ job }: { job: EmailJob }) {
             <CardHeader>
               <CardTitle className="text-base">Slices</CardTitle>
               <CardDescription>
-                {stats.uploaded}/{stats.total} uploaded · {formatBytes(stats.bytes)} total
+                {stats.uploaded}/{shown.length} uploaded · {formatBytes(shown.reduce((a, r) => a + (r.result?.size ?? 0), 0))} total
+                {hidden > 0 && ` · ${hidden} unapproved slice${hidden > 1 ? 's' : ''} hidden`}
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3">
-              {(busy || uploading) && <Progress value={(stats.uploaded / Math.max(1, stats.total)) * 100} />}
+              {(busy || uploading) && <Progress value={(stats.uploaded / Math.max(1, shown.length)) * 100} />}
               <div className="divide-y rounded-md border" data-testid="upload-list">
-                {rows.map(({ slice, result, upload }) => {
+                {shown.map(({ slice, result, upload }) => {
                   // Shown exactly as it will be (or is) named in Klaviyo.
                   const fileName = klaviyoImageName(job.uploadPrefix, slice)
                   const renamePending = upload?.status === 'done' && upload.name !== fileName
@@ -142,8 +148,8 @@ export function UploadStep({ job }: { job: EmailJob }) {
               </CardHeader>
               <CardContent className="grid gap-4">
                 <ul className="grid gap-2" data-testid="preflight">
-                  <Check state={allApproved ? 'ok' : 'fail'}>
-                    {stats.approved}/{stats.total} slices approved by you
+                  <Check state={allApproved ? 'ok' : stats.approved ? 'warn' : 'fail'}>
+                    {stats.approved}/{stats.total} slices approved by you{!allApproved && stats.approved > 0 && ' — only approved slices upload'}
                   </Check>
                   <Check state={stats.overBudget ? 'warn' : 'ok'}>
                     {stats.overBudget ? `${stats.overBudget} over the ${formatBytes(settings.compress.maxBytes)} target` : `All within ${formatBytes(settings.compress.maxBytes)}`} (Klaviyo max 5 MB)
@@ -177,14 +183,14 @@ export function UploadStep({ job }: { job: EmailJob }) {
                 <Button
                   data-testid="upload-start"
                   size="lg"
-                  disabled={!allApproved || !keyReady || busy || (allUploaded && !stats.renamePending)}
-                  onClick={() => (allUploaded ? start() : setConfirming(true))}
+                  disabled={!stats.approved || !keyReady || busy || (nothingToUpload && !stats.renamePending)}
+                  onClick={() => (nothingToUpload ? start() : setConfirming(true))}
                 >
-                  {busy ? <Loader2 className="animate-spin" /> : allUploaded && !stats.renamePending ? <CheckCircle2 /> : stats.uploadErrors ? <RotateCw /> : <CloudUpload />}
-                  {allUploaded && stats.renamePending
+                  {busy ? <Loader2 className="animate-spin" /> : nothingToUpload && !stats.renamePending ? <CheckCircle2 /> : stats.uploadErrors ? <RotateCw /> : <CloudUpload />}
+                  {nothingToUpload && stats.renamePending
                     ? `Update ${stats.renamePending} name${stats.renamePending > 1 ? 's' : ''} in Klaviyo`
-                    : allUploaded
-                    ? 'Uploaded'
+                    : nothingToUpload
+                    ? allUploaded ? 'Uploaded' : 'Approved slices uploaded'
                     : stats.uploadErrors
                       ? `Retry ${pending} upload${pending > 1 ? 's' : ''}`
                       : `Upload ${pending} image${pending > 1 ? 's' : ''}`}
@@ -201,10 +207,10 @@ export function UploadStep({ job }: { job: EmailJob }) {
       <Dialog open={confirming} onOpenChange={setConfirming}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Upload {pending} images to Klaviyo?</DialogTitle>
+            <DialogTitle>Upload {pending} image{pending === 1 ? '' : 's'} to Klaviyo?</DialogTitle>
             <DialogDescription>
               They'll be added to your Klaviyo image library{settings.hideUploadsInLibrary ? ' (hidden)' : ''} named
-              after each slice's <b>Name</b> (e.g. “{rows[0] ? klaviyoImageName(job.uploadPrefix, rows[0].slice) : ''}”). You approved every slice; uploads
+              after each slice's <b>Name</b> (e.g. “{rows[0] ? klaviyoImageName(job.uploadPrefix, rows[0].slice) : ''}”). {allApproved ? 'You approved every slice' : `Only approved slices are uploaded; the ${stats.total - stats.approved} unapproved one${stats.total - stats.approved > 1 ? 's wait' : ' waits'} until you approve ${stats.total - stats.approved > 1 ? 'them' : 'it'}`}; uploads
               can't be undone from here.
             </DialogDescription>
           </DialogHeader>
