@@ -67,6 +67,8 @@ export interface ReplaceResult {
   insertedAt: { section: number; row: number }
   contentWidth: number
   warnings: string[]
+  /** replaceAll: header/footer sections left in place. */
+  kept?: number
 }
 
 export const blockKey = (s: number, r: number, c: number, b: number, id?: string) => `s${s}.r${r}.c${c}.b${b}${id ? `:${id}` : ''}`
@@ -332,6 +334,105 @@ export function insertRows(original: Json, anchor: SliceAnchor, sliceRows: Slice
     contentWidth,
     warnings,
   }
+}
+
+const hasBackground = (section: Json) => Boolean(section?.data?.styles?.background_url || section?.data?.styles?.background_color)
+
+/**
+ * Settings for the section that holds the slices: copied from the email's existing section that
+ * has a background (e.g. the White_BG background image), preferring non-universal ones, so the
+ * background is kept. Inner padding is zeroed so the slices display at full width.
+ */
+function sliceSectionData(sections: Json[]): Json | undefined {
+  const source =
+    sections.find((s) => !s.universal_id && hasBackground(s)) ?? sections.find(hasBackground) ?? sections.find((s) => !s.universal_id) ?? sections[0]
+  if (!source?.data) return undefined
+  const data = structuredClone(source.data)
+  for (const k of Object.keys(data.styles ?? {})) if (/^inner_padding_/.test(k)) data.styles[k] = 0
+  return data
+}
+
+/**
+ * What an email looks like without its content: email-level settings plus the settings for the
+ * slices' section (with its background). Lets the app rebuild an email whose current layout
+ * Klaviyo can't export.
+ */
+export interface EmailSkeleton {
+  definition: Json
+  sectionData?: Json
+}
+
+export function skeletonOf(def: Json): EmailSkeleton {
+  const sectionData = sliceSectionData(sectionsOf(def))
+  const definition = stripIds(structuredClone(def))
+  definition.body = { ...(definition.body ?? {}), sections: [] }
+  return { definition, sectionData }
+}
+
+/** Used when neither the email nor a saved skeleton is available: a 600px email on white. */
+export const DEFAULT_SKELETON: EmailSkeleton = {
+  definition: { body: { properties: {}, styles: { width: 600, background_color: '#ffffff' }, sections: [] }, styles: [] },
+  sectionData: { properties: {}, display_options: {}, styles: { background_color: '#ffffff' } },
+}
+
+/**
+ * Replaces everything in the email (every section, including header and footer) with the slices,
+ * in one section that keeps the email's section background. Email-level styles stay too.
+ * Pass a skeleton instead of the email when Klaviyo can't export the email's current layout.
+ */
+const blocksOf = (section: Json): Json[] => (section.rows ?? []).flatMap((r: Json) => (r.columns ?? []).flatMap((c: Json) => c.blocks ?? []))
+
+/**
+ * Header and footer sections added in Klaviyo, which replaceAll leaves in place: universal
+ * sections, sections with a universal block or a header block, and sections with the unsubscribe link.
+ */
+export function isHeaderOrFooter(section: Json): boolean {
+  if (section.universal_id) return true
+  const blocks = blocksOf(section)
+  return blocks.some((b) => b.universal_id || b.type === 'header') || /unsubscribe/i.test(JSON.stringify(blocks))
+}
+
+/**
+ * Replaces the email's content with the slices, in one section that keeps the email's section
+ * background. Header and footer sections (see isHeaderOrFooter) stay, so sending again after
+ * changing slices doesn't undo them; the slices go between them. Email-level styles stay too.
+ * Pass a skeleton instead of the email when Klaviyo can't export the email's current layout
+ * (then nothing can be kept and the whole email is rebuilt).
+ */
+/** An image from the Klaviyo library to use as the slices' section background. */
+export interface SectionBackground {
+  url: string
+  assetId: string
+  name: string
+}
+
+export function replaceAll(original: Json | EmailSkeleton, sliceRows: SliceRowInput[], background?: SectionBackground): ReplaceResult {
+  if (!sliceRows.length) throw new Error('There are no slices to insert.')
+  const fromSkeleton = 'definition' in original && !('body' in original)
+  const def: Json = structuredClone(fromSkeleton ? (original as EmailSkeleton).definition : original)
+  const sections = sectionsOf(def)
+  const removedSections = sections.filter((s) => !isHeaderOrFooter(s))
+  const kept = sections.filter(isHeaderOrFooter)
+  const removed = removedSections.reduce((n, s) => n + blocksOf(s).length, 0)
+  // Background from the content being replaced (e.g. the previous slices' White_BG section) first.
+  let sectionData: Json | undefined = fromSkeleton ? structuredClone((original as EmailSkeleton).sectionData) : (sliceSectionData(removedSections) ?? sliceSectionData(kept))
+  if (background) {
+    // Klaviyo's section style fields for a background image (SectionStyles in the Templates API).
+    sectionData = sectionData ?? { properties: {}, display_options: {}, styles: {} }
+    sectionData.styles = { ...(sectionData.styles ?? {}), background_url: background.url, background_asset_id: background.assetId }
+  }
+  // Where the slices go: where the replaced content started; with nothing to replace, before the
+  // last kept section (usually the footer) or at the end.
+  const firstRemoved = sections.findIndex((s) => !isHeaderOrFooter(s))
+  const at = firstRemoved >= 0 ? sections.slice(0, firstRemoved).length : kept.length >= 2 ? kept.length - 1 : kept.length
+  def.body = def.body ?? {}
+  def.body.sections = kept
+  const ins = insertRows(def, { section: at, row: 0, newSection: true, sectionData, label: 'Email content' }, sliceRows)
+  const warnings = [...ins.warnings]
+  if (!background && !sectionData?.styles?.background_url) {
+    warnings.push('No section background image was set for the slices. Set it in Klaviyo if needed.')
+  }
+  return { ...ins, removed, kept: kept.length, warnings }
 }
 
 /** Removes the selected image blocks and inserts the slice rows where the first of them was. */

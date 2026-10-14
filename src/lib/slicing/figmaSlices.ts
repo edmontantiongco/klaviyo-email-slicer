@@ -158,7 +158,7 @@ export function carryOverMeta(next: SliceLayout, prev: SliceLayout | null): Slic
       ...r,
       cells: r.cells.map((c) => {
         const o = old.get(c.id)
-        return o ? { ...c, link: o.link, alt: o.alt, format: o.format } : c
+        return o ? { ...c, link: o.link, alt: o.alt, format: o.format, deleted: o.deleted } : c
       }),
     })),
   }

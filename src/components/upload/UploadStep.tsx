@@ -7,6 +7,7 @@ import {
   CloudUpload,
   Loader2,
   RotateCw,
+  Send,
   XCircle,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -20,8 +21,12 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { SettingsDialog } from '@/components/layout/SettingsDialog'
 import { CampaignUpdate } from '@/components/upload/CampaignUpdate'
 import { RefreshFromFigmaButton } from '@/components/common/FigmaSync'
+import { useCampaign } from '@/hooks/useCampaign'
 import { useHealth } from '@/hooks/useHealth'
 import { useJobSlices } from '@/hooks/useJobStats'
+import type { CampaignReplaceResult } from '@/lib/api'
+import { campaignRows, describePlan } from '@/lib/campaign'
+import { updateCell } from '@/lib/slicing'
 import { klaviyoImageName, sliceFileName, sliceIndexLabel } from '@/lib/naming'
 import { cn, formatBytes, slugify } from '@/lib/utils'
 import { useSettings } from '@/store/settings'
@@ -43,14 +48,16 @@ async function copy(text: string, what: string) {
 }
 
 export function UploadStep({ job }: { job: EmailJob }) {
-  const { uploadJob, setStep, patchJob } = useWorkspace()
+  const { uploadJob, setStep, patchJob, setLayout } = useWorkspace()
   const settings = useSettings()
   const health = useHealth()
   const { rows, stats } = useJobSlices(job)
-  const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
+  /** The review shown before anything is sent; `plan` is the campaign change (dry run). */
+  const [review, setReview] = useState<null | { loading: boolean; plan?: CampaignReplaceResult; error?: string }>(null)
 
   const keyReady = !!settings.klaviyoKey || !!health.data?.klaviyoKeyConfigured
+  const campaign = useCampaign(job, keyReady)
   const allApproved = stats.total > 0 && stats.approved === stats.total
   const allUploaded = stats.total > 0 && stats.uploaded === stats.total
   // Only approved slices upload; unapproved ones wait until they're approved.
@@ -59,21 +66,68 @@ export function UploadStep({ job }: { job: EmailJob }) {
   // Unapproved slices aren't uploaded, so they're left out of the list (already-uploaded ones stay).
   const shown = rows.filter((r) => r.upload || r.result?.approved)
   const hidden = rows.length - shown.length
+  /** Deleted from the app when sending, so only approved slices remain. */
+  const unapproved = rows.filter((r) => !r.result?.approved)
   const uploading = rows.some((r) => r.upload?.status === 'uploading')
+  const toCampaign = campaign.ready
+  const canSend = stats.approved > 0 && stats.working === 0 && keyReady && !busy && !campaign.loading && (toCampaign || !nothingToUpload || stats.renamePending > 0)
 
-  const start = async () => {
-    setConfirming(false)
+  const openReview = async () => {
+    if (!toCampaign) return setReview({ loading: false })
+    setReview({ loading: true })
+    try {
+      setReview({ loading: false, plan: await campaign.replace(campaignRows(job, settings.compress).rows, true) })
+    } catch (e) {
+      setReview({ loading: false, error: (e as Error).message })
+    }
+  }
+
+  /** Uploads the approved slices (and syncs renamed ones), then updates the campaign if one is set up. */
+  const send = async () => {
+    setReview(null)
     setBusy(true)
     try {
+      if (unapproved.length && job.layout) {
+        let layout = job.layout
+        for (const r of unapproved) layout = updateCell(layout, r.slice.id, { deleted: true })
+        setLayout(job.id, layout, { history: true })
+      }
       await uploadJob(job.id)
-      const after = useWorkspace.getState().jobs.find((j) => j.id === job.id)
-      const failed = Object.values(after?.uploads ?? {}).filter((u) => u.status === 'error').length
-      if (failed) toast.error(`${failed} upload${failed > 1 ? 's' : ''} failed`, { description: 'Check the list below and retry.' })
-      else toast.success(allApproved ? 'All slices uploaded to Klaviyo' : 'Approved slices uploaded to Klaviyo', allApproved ? undefined : { description: `${stats.total - stats.approved} unapproved slice${stats.total - stats.approved > 1 ? 's' : ''} not uploaded yet.` })
+      const after = useWorkspace.getState().jobs.find((j) => j.id === job.id)!
+      const failed = Object.values(after.uploads).filter((u) => u.status === 'error').length
+      if (failed) {
+        toast.error(`${failed} upload${failed > 1 ? 's' : ''} failed`, { description: `Check the list below and retry.${toCampaign ? ' The campaign was not changed.' : ''}` })
+        return
+      }
+      if (!toCampaign) {
+        toast.success('Approved slices uploaded to Klaviyo', unapproved.length ? { description: `Deleted ${unapproved.length} unapproved slice${unapproved.length > 1 ? 's' : ''} from the app.` } : undefined)
+        return
+      }
+      const { rows: sliceRows, missingUploads } = campaignRows(after, settings.compress)
+      if (missingUploads) throw new Error(`${missingUploads} slice upload(s) are missing — retry them in the list above. The campaign was not changed.`)
+      const result = await campaign.replace(sliceRows, false)
+      campaign.applied(result)
+      toast.success('Sent to Klaviyo', {
+        description: `The email is now ${result.inserted} slice row${result.inserted === 1 ? '' : 's'}. Open the campaign in Klaviyo to check, then send a test.`,
+      })
+    } catch (e) {
+      toast.error('Could not update the campaign', { description: (e as Error).message, duration: 30000, closeButton: true })
     } finally {
       setBusy(false)
     }
   }
+
+  const sendLabel = toCampaign
+    ? nothingToUpload
+      ? 'Update campaign'
+      : `Upload ${pending} image${pending > 1 ? 's' : ''} & update campaign`
+    : nothingToUpload && stats.renamePending
+      ? `Update ${stats.renamePending} name${stats.renamePending > 1 ? 's' : ''} in Klaviyo`
+      : nothingToUpload
+        ? allUploaded ? 'Uploaded' : 'Approved slices uploaded'
+        : stats.uploadErrors
+          ? `Retry ${pending} upload${pending > 1 ? 's' : ''}`
+          : `Upload ${pending} image${pending > 1 ? 's' : ''}`
 
   return (
     <ScrollArea className="h-full">
@@ -92,7 +146,7 @@ export function UploadStep({ job }: { job: EmailJob }) {
               <CardTitle className="text-base">Slices</CardTitle>
               <CardDescription>
                 {stats.uploaded}/{shown.length} uploaded · {formatBytes(shown.reduce((a, r) => a + (r.result?.size ?? 0), 0))} total
-                {hidden > 0 && ` · ${hidden} unapproved slice${hidden > 1 ? 's' : ''} hidden`}
+                {hidden > 0 && ` · ${hidden} unapproved slice${hidden > 1 ? 's' : ''} hidden (deleted when you send)`}
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3">
@@ -149,7 +203,7 @@ export function UploadStep({ job }: { job: EmailJob }) {
               <CardContent className="grid gap-4">
                 <ul className="grid gap-2" data-testid="preflight">
                   <Check state={allApproved ? 'ok' : stats.approved ? 'warn' : 'fail'}>
-                    {stats.approved}/{stats.total} slices approved by you{!allApproved && stats.approved > 0 && ' — only approved slices upload'}
+                    {stats.approved}/{stats.total} slices approved by you{!allApproved && stats.approved > 0 && ' — unapproved ones are deleted when you send'}
                   </Check>
                   <Check state={stats.overBudget ? 'warn' : 'ok'}>
                     {stats.overBudget ? `${stats.overBudget} over the ${formatBytes(settings.compress.maxBytes)} target` : `All within ${formatBytes(settings.compress.maxBytes)}`} (Klaviyo max 5 MB)
@@ -166,6 +220,11 @@ export function UploadStep({ job }: { job: EmailJob }) {
                       <SettingsDialog trigger={<button className="ml-1 underline">Add key</button>} />
                     )}
                   </Check>
+                  {campaign.info && (
+                    <Check state={campaign.problem ? 'fail' : 'ok'}>
+                      {campaign.problem ?? `Campaign ready: “${campaign.info.campaign.name}” (draft, drag-and-drop)`}
+                    </Check>
+                  )}
                 </ul>
                 <div className="grid gap-1.5">
                   <Label htmlFor="prefix">ZIP / HTML file name prefix</Label>
@@ -180,46 +239,82 @@ export function UploadStep({ job }: { job: EmailJob }) {
                     like its slice (the <b>Name</b> field), e.g. <b>{rows[0] ? klaviyoImageName(job.uploadPrefix, rows[0].slice) : '—'}</b>.
                   </p>
                 </div>
-                <Button
-                  data-testid="upload-start"
-                  size="lg"
-                  disabled={!stats.approved || !keyReady || busy || (nothingToUpload && !stats.renamePending)}
-                  onClick={() => (nothingToUpload ? start() : setConfirming(true))}
-                >
-                  {busy ? <Loader2 className="animate-spin" /> : nothingToUpload && !stats.renamePending ? <CheckCircle2 /> : stats.uploadErrors ? <RotateCw /> : <CloudUpload />}
-                  {nothingToUpload && stats.renamePending
-                    ? `Update ${stats.renamePending} name${stats.renamePending > 1 ? 's' : ''} in Klaviyo`
-                    : nothingToUpload
-                    ? allUploaded ? 'Uploaded' : 'Approved slices uploaded'
-                    : stats.uploadErrors
-                      ? `Retry ${pending} upload${pending > 1 ? 's' : ''}`
-                      : `Upload ${pending} image${pending > 1 ? 's' : ''}`}
-                </Button>
-                <p className="text-muted-foreground text-xs">Klaviyo allows 100 uploads/min and 500/day per account; the local server paces requests for you.</p>
               </CardContent>
             </Card>
           </div>
         </div>
 
-        <CampaignUpdate job={job} allApproved={allApproved} keyReady={keyReady} />
+        <CampaignUpdate job={job} campaign={campaign} keyReady={keyReady} approved={stats.approved} />
+
+        <Card className="gap-3" data-testid="send-card">
+          <CardContent className="flex flex-wrap items-center gap-4">
+            <div className="min-w-60 flex-1 text-sm">
+              <div className="font-medium">Send to Klaviyo</div>
+              <div className="text-muted-foreground text-xs">
+                {!stats.approved
+                  ? 'Approve at least one slice in Optimize & review first.'
+                  : `${nothingToUpload ? 'Approved slices are uploaded' : `Uploads ${pending} approved image${pending > 1 ? 's' : ''}`}${toCampaign ? ', then makes them the campaign’s email' : ''}. You’ll review everything before it’s sent. Klaviyo allows 100 uploads/min and 500/day; the local server paces requests for you.`}
+              </div>
+            </div>
+            <Button data-testid="upload-start" size="lg" disabled={!canSend} onClick={() => (!toCampaign && nothingToUpload && !unapproved.length ? send() : openReview())}>
+              {busy ? <Loader2 className="animate-spin" /> : !canSend && nothingToUpload ? <CheckCircle2 /> : toCampaign ? <Send /> : stats.uploadErrors ? <RotateCw /> : <CloudUpload />}
+              {sendLabel}
+            </Button>
+          </CardContent>
+        </Card>
       </div>
 
-      <Dialog open={confirming} onOpenChange={setConfirming}>
+      <Dialog open={!!review} onOpenChange={(o) => !o && setReview(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Upload {pending} image{pending === 1 ? '' : 's'} to Klaviyo?</DialogTitle>
-            <DialogDescription>
-              They'll be added to your Klaviyo image library{settings.hideUploadsInLibrary ? ' (hidden)' : ''} named
-              after each slice's <b>Name</b> (e.g. “{rows[0] ? klaviyoImageName(job.uploadPrefix, rows[0].slice) : ''}”). {allApproved ? 'You approved every slice' : `Only approved slices are uploaded; the ${stats.total - stats.approved} unapproved one${stats.total - stats.approved > 1 ? 's wait' : ' waits'} until you approve ${stats.total - stats.approved > 1 ? 'them' : 'it'}`}; uploads
-              can't be undone from here.
-            </DialogDescription>
+            <DialogTitle>Send to Klaviyo?</DialogTitle>
+            <DialogDescription>Check what will happen. Nothing is scheduled or sent to subscribers, and it can’t be undone from the app.</DialogDescription>
           </DialogHeader>
+          <ul className="grid gap-2" data-testid="send-review">
+            <Check state="ok">
+              {nothingToUpload
+                ? 'Approved slices are already uploaded'
+                : `Upload ${pending} approved image${pending > 1 ? 's' : ''} to your Klaviyo library${settings.hideUploadsInLibrary ? ' (hidden)' : ''}, named after each slice (e.g. “${shown[0] ? klaviyoImageName(job.uploadPrefix, shown[0].slice) : ''}”)`}
+            </Check>
+            {stats.renamePending > 0 && <Check state="ok">Rename {stats.renamePending} image{stats.renamePending > 1 ? 's' : ''} in Klaviyo to match the slice names</Check>}
+            {unapproved.length > 0 && (
+              <Check state="warn">
+                Delete {unapproved.length} unapproved slice{unapproved.length > 1 ? 's' : ''} from the app ({unapproved.map((r) => r.slice.meta.name).join(', ')}) — undo in the
+                Slice step if needed
+              </Check>
+            )}
+            {toCampaign &&
+              (review?.loading ? (
+                <li className="text-muted-foreground flex items-center gap-2 text-sm">
+                  <Loader2 className="size-4 animate-spin" /> Checking the campaign…
+                </li>
+              ) : review?.error ? (
+                <Check state="fail">{review.error}</Check>
+              ) : review?.plan ? (
+                <>
+                  <Check state="ok">
+                    In “{campaign.info?.campaign.name}”:{' '}
+{campaign.info?.definitionError
+                      ? 'rebuild the whole email'
+                      : `replace ${review.plan.removed} content block${review.plan.removed === 1 ? '' : 's'}${review.plan.kept ? ` (keeping ${review.plan.kept} header/footer section${review.plan.kept === 1 ? '' : 's'})` : ''}`}{' '}
+                    with {review.plan.inserted} slice row
+                    {review.plan.inserted === 1 ? '' : 's'} ({describePlan(review.plan.rows)}), {review.plan.contentWidth}px wide
+                  </Check>
+                  {review.plan.background && <Check state="ok">Section background image: “{review.plan.background}” from your Klaviyo library</Check>}
+                  {review.plan.warnings.map((w) => (
+                    <Check key={w} state="warn">
+                      {w}
+                    </Check>
+                  ))}
+                </>
+              ) : null)}
+          </ul>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirming(false)}>
+            <Button variant="outline" onClick={() => setReview(null)}>
               Cancel
             </Button>
-            <Button data-testid="upload-confirm" onClick={start}>
-              <CloudUpload /> Upload
+            <Button data-testid="upload-confirm" onClick={send} disabled={toCampaign && (!review?.plan || review.loading)}>
+              {toCampaign ? <Send /> : <CloudUpload />} {toCampaign ? 'Send to Klaviyo' : 'Upload'}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -72,14 +72,30 @@ export interface CampaignInfo {
   campaign: { id: string; name: string; status: string; editable: boolean }
   message: { id: string; subject: string; previewText: string; label: string }
   template: { id: string; name: string; editorType: string; updated: string | null }
-  summary: { width: number; sections: number; blocks: number; images: CampaignImage[]; blockTypes: Record<string, number> } | null
+  summary: {
+    width: number
+    sections: number
+    blocks: number
+    images: CampaignImage[]
+    blockTypes: Record<string, number>
+  } | null
+  /** Klaviyo's reason when it can't export the email's layout. The email can still be rebuilt from the slices. */
+  definitionError?: string
+  /** Email settings without content (incl. the section background), when the layout could be read. */
+  skeleton?: EmailSkeleton
+}
+
+/** An email's settings without its content; used to rebuild emails whose layout Klaviyo can't export. */
+export interface EmailSkeleton {
+  definition: Record<string, unknown>
+  sectionData?: Record<string, unknown>
 }
 
 export interface CampaignSliceRow {
   cells: { src: string; assetId?: string; href: string; alt: string; fraction: number }[]
 }
 
-/** Where the slices go after images were removed on their own (returned by the remove call). */
+/** Where the slices go after images were removed on their own (saved by earlier versions of the app). */
 export interface SliceAnchor {
   section: number
   row: number
@@ -88,19 +104,12 @@ export interface SliceAnchor {
   label: string
 }
 
-export interface CampaignRemoveResult {
-  dryRun: boolean
-  removed: number
-  anchor: SliceAnchor
-  warnings: string[]
-  method?: 'update' | 'assign'
-  templateId?: string
-  templateUpdated?: string | null
-  after?: CampaignInfo['summary']
-}
-
 export interface CampaignReplaceResult {
   dryRun: boolean
+  /** Replace-all: header/footer sections left in place. */
+  kept?: number
+  /** Replace-all: name of the library image set as the slices' section background (White_BG). */
+  background?: string
   removed: number
   inserted: number
   rows: { index: number; cells: number; mode: 'image' | 'columns' | 'html'; columnLayout?: string }[]
@@ -169,6 +178,10 @@ export const api = {
     rows: CampaignSliceRow[]
     dryRun: boolean
     templateUpdated?: string | null
+    /** Replace the email's whole content with the slices. */
+    all?: boolean
+    /** With `all`, used when Klaviyo can't export the email's current layout. */
+    skeleton?: EmailSkeleton
     /** Used when no images are selected: insert where earlier-removed images were. */
     anchor?: SliceAnchor
   }) => post<CampaignReplaceResult>('/api/klaviyo/campaign/replace', body),
@@ -183,7 +196,4 @@ export const api = {
       '/api/klaviyo/campaign/swap',
       body,
     ),
-
-  klaviyoRemoveCampaignImages: (body: { campaignId: string; removeKeys: string[]; dryRun: boolean; templateUpdated?: string | null }) =>
-    post<CampaignRemoveResult>('/api/klaviyo/campaign/remove', body),
 }

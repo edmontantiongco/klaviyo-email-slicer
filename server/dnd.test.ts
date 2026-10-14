@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildRows, idsFromKlaviyoUrl, insertRows, matchColumnLayout, removeBlocks, replaceImages, stripIds, summarize, swapImages, type Json } from './dnd.ts'
+import { DEFAULT_SKELETON, buildRows, idsFromKlaviyoUrl, insertRows, matchColumnLayout, removeBlocks, replaceAll, replaceImages, skeletonOf, stripIds, summarize, swapImages, type Json } from './dnd.ts'
 
 const img = (id: string, src: string, href = '', extra: Json = {}): Json => ({
   id,
@@ -51,6 +51,89 @@ describe('summarize', () => {
     expect(s.images.find((i) => i.blockId === 'g2')!).toMatchObject({ section: 1, row: 2, column: 1, columnsInRow: 3 })
     expect(s.blockTypes).toEqual({ image: 7, text: 2 })
     expect(s.width).toBe(600)
+  })
+})
+
+describe('replaceAll', () => {
+  it('replaces the content between header and footer with one full-width section, keeping the background', () => {
+    const def = fixture()
+    const bg = { background_url: 'https://cdn/old-bg.png', background_asset_id: 'OLD', background_color: '#ffffff', inner_padding_left: 20, inner_padding_right: 20 }
+    def.body.sections[1].data.styles = bg
+    const res = replaceAll(def, slices)
+    // header (logo image, not a header block) is content; the universal footer stays.
+    expect(res.definition.body.sections.map((x: Json) => x.id ?? 'slices')).toEqual(['slices', 'footer'])
+    expect(res.kept).toBe(1)
+    expect(res.definition.body.styles).toEqual(def.body.styles)
+    expect(res.definition.body.sections[0].data.styles).toEqual({ ...bg, inner_padding_left: 0, inner_padding_right: 0 })
+    expect(res.removed).toBe(7)
+    expect(res.inserted).toBe(3)
+    expect(res.contentWidth).toBe(600)
+    expect(res.warnings.some((w) => /background|padding/.test(w))).toBe(false)
+    expect(summarize(res.definition).images.map((i) => i.src)).toContain('https://k/new1.jpg')
+  })
+
+  it('keeps header blocks and the unsubscribe footer, and sending again replaces only the slices', () => {
+    const def = fixture()
+    def.body.sections[0] = section('hdr', [row('1-column-full-width', [{ id: 'h', type: 'header', data: { properties: {} } }])])
+    def.body.sections[2] = section('ftr', [row('1-column-full-width', [{ id: 'u', type: 'text', data: { content: '<a href="{% unsubscribe %}">Unsubscribe</a>' } }])])
+    const first = replaceAll(def, slices)
+    expect(first.definition.body.sections.map((x: Json) => x.id ?? 'slices')).toEqual(['hdr', 'slices', 'ftr'])
+    const again = replaceAll(first.definition, slices.slice(0, 1))
+    expect(again.definition.body.sections.map((x: Json) => x.id ?? 'slices')).toEqual(['hdr', 'slices', 'ftr'])
+    expect(again.removed).toBe(5)
+    expect(again.kept).toBe(2)
+  })
+
+  it('puts the slices between header and footer when there is no content to replace', () => {
+    const def = fixture()
+    def.body.sections = [section('hdr', [row('1-column-full-width', [{ id: 'h', type: 'header', data: {} }])]), def.body.sections[2]]
+    const res = replaceAll(def, slices)
+    expect(res.definition.body.sections.map((x: Json) => x.id ?? 'slices')).toEqual(['hdr', 'slices', 'footer'])
+    expect(res.removed).toBe(0)
+  })
+
+  it('rebuilds from a saved skeleton when the email itself can’t be loaded', () => {
+    const def = fixture()
+    def.body.sections[1].data.styles = { background_url: 'https://cdn/old-bg.png', inner_padding_left: 24 }
+    const skeleton = skeletonOf(def)
+    expect(skeleton.definition.body.sections).toEqual([])
+    expect(skeleton.definition.body.styles).toEqual(def.body.styles)
+    expect(JSON.stringify(skeleton.definition)).not.toMatch(/"id"/)
+    const res = replaceAll(skeleton, slices)
+    expect(res.removed).toBe(0)
+    expect(res.definition.body.sections).toHaveLength(1)
+    expect(res.definition.body.sections[0].data.styles).toEqual({ background_url: 'https://cdn/old-bg.png', inner_padding_left: 0 })
+    expect(res.warnings.some((w) => /background/.test(w))).toBe(false)
+
+    const fallback = replaceAll(DEFAULT_SKELETON, slices)
+    expect(fallback.definition.body.sections[0].data.styles.background_color).toBe('#ffffff')
+    expect(DEFAULT_SKELETON.definition.body.sections).toEqual([])
+  })
+
+  it('always sets the White_BG library image as the slices’ section background', () => {
+    const white = { url: 'https://cdn/White_BG.png', assetId: 'IMG1', name: 'White_BG' }
+    const def = fixture()
+    def.body.sections[1].data.styles = { background_url: 'https://cdn/other.png', background_asset_id: 'X', background_format: 'cover', inner_padding_left: 10 }
+    const res = replaceAll(def, slices, white)
+    expect(res.definition.body.sections[0].data.styles).toEqual({ background_url: white.url, background_asset_id: 'IMG1', background_format: 'cover', inner_padding_left: 0 })
+    expect(res.warnings.some((w) => /background/.test(w))).toBe(false)
+
+    const rebuilt = replaceAll(DEFAULT_SKELETON, slices, white)
+    expect(rebuilt.definition.body.sections[0].data.styles).toMatchObject({ background_url: white.url, background_asset_id: 'IMG1' })
+  })
+
+  it('matches the White_BG / White Background image names', async () => {
+    const { WHITE_BG } = await import('./campaign.ts')
+    for (const n of ['White_BG', 'White BG', 'white-bg.png', 'White Background', 'White_Background.jpg']) expect(WHITE_BG.test(n)).toBe(true)
+    for (const n of ['White_BG copy', 'Off White Background', 'Whitepaper']) expect(WHITE_BG.test(n)).toBe(false)
+  })
+
+  it('works on an email with no images, and says when there is no background to keep', () => {
+    const def = fixture()
+    def.body.sections = [section('only', [row('1-column-full-width', [text('hi')])])]
+    const res = replaceAll(def, slices)
+    expect(res.removed).toBe(1)
+    expect(res.warnings.some((w) => /No section background/.test(w))).toBe(true)
   })
 })
 

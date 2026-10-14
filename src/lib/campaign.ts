@@ -1,42 +1,37 @@
-import type { CampaignImage, CampaignSliceRow } from './api'
+import type { CampaignSliceRow } from './api'
 import { getSlices } from './slicing'
 import { currentResult, type EmailJob } from '@/store/workspace'
 import type { CompressOptions } from './compress/types'
 
-/** Turns the job's slice layout into rows for the campaign update (fractions + uploaded Klaviyo URLs). */
+/**
+ * Turns the job's approved slices into rows for the campaign update (fractions + uploaded Klaviyo URLs).
+ * Unapproved slices are left out of the email; rows left empty are dropped.
+ */
 export function campaignRows(job: EmailJob, compress: CompressOptions): { rows: CampaignSliceRow[]; missingUploads: number } {
   if (!job.layout) return { rows: [], missingUploads: 0 }
   const slices = getSlices(job.layout)
   let missingUploads = 0
-  const rows: CampaignSliceRow[] = job.layout.rows.map((_, rowIndex) => ({
-    cells: slices
-      .filter((s) => s.rowIndex === rowIndex)
-      .sort((a, b) => a.colIndex - b.colIndex)
-      .map((s) => {
-        const r = currentResult(job, s, compress)
-        const u = job.uploads[s.id]
-        const uploaded = u?.status === 'done' && r && u.key === r.key && u.url
-        if (!uploaded) missingUploads++
-        return {
-          src: uploaded ? u.url! : `pending://${s.id}`,
-          assetId: uploaded ? u.klaviyoId : undefined,
-          href: s.meta.link.trim(),
-          alt: s.meta.alt.trim(),
-          fraction: s.width / job.layout!.width,
-        }
-      }),
-  }))
+  const rows: CampaignSliceRow[] = job.layout.rows
+    .map((_, rowIndex) => ({
+      cells: slices
+        .filter((s) => s.rowIndex === rowIndex && currentResult(job, s, compress)?.approved)
+        .sort((a, b) => a.colIndex - b.colIndex)
+        .map((s) => {
+          const r = currentResult(job, s, compress)
+          const u = job.uploads[s.id]
+          const uploaded = u?.status === 'done' && r && u.key === r.key && u.url
+          if (!uploaded) missingUploads++
+          return {
+            src: uploaded ? u.url! : `pending://${s.id}`,
+            assetId: uploaded ? u.klaviyoId : undefined,
+            href: s.meta.link.trim(),
+            alt: s.meta.alt.trim(),
+            fraction: s.width / job.layout!.width,
+          }
+        }),
+    }))
+    .filter((r) => r.cells.length)
   return { rows, missingUploads }
-}
-
-/**
- * Default selection: every non-universal image, except header images (first section)
- * when there are images further down — those are usually the logo.
- */
-export function defaultSelection(images: CampaignImage[]): string[] {
-  const candidates = images.filter((i) => !i.universal)
-  const later = candidates.some((i) => i.section > 0)
-  return candidates.filter((i) => !(later && i.section === 0)).map((i) => i.key)
 }
 
 export function describePlan(rows: { mode: 'image' | 'columns' | 'html'; cells: number }[]) {

@@ -93,6 +93,11 @@ export interface CellMeta {
   alt: string
   /** Per-slice override; 'auto' follows the global default. */
   format: FormatChoice
+  /**
+   * Deleted by the user (unapproved slices are deleted when sending to Klaviyo). The area stays in
+   * the layout so the other slices keep their position, but the slice is left out everywhere else.
+   */
+  deleted?: boolean
 }
 
 export interface Row {

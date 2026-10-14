@@ -24,6 +24,7 @@ export function getSlices(layout: SliceLayout): Slice[] {
     const top = rowTop(layout, rowIndex)
     const xs = [0, ...row.colCuts, layout.width]
     row.cells.forEach((meta, colIndex) => {
+      if (meta.deleted) return
       out.push({
         id: meta.id,
         rowIndex,

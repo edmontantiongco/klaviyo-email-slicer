@@ -1,7 +1,7 @@
 import { Router, type Request } from 'express'
 import { HttpError, fetchWithRetry } from './http.ts'
 import { KLAVIYO_API, headers, readKlaviyo } from './klaviyo.ts'
-import { idsFromKlaviyoUrl, insertRows, removeBlocks, replaceImages, stripIds, summarize, swapImages, type ImageSwap, type SliceAnchor, type SliceRowInput } from './dnd.ts'
+import { DEFAULT_SKELETON, type SectionBackground, idsFromKlaviyoUrl, insertRows, removeBlocks, replaceAll, replaceImages, skeletonOf, stripIds, summarize, swapImages, type ImageSwap, type SliceAnchor, type SliceRowInput } from './dnd.ts'
 import type { Json } from './dnd.ts'
 
 /**
@@ -40,6 +40,8 @@ interface Loaded {
   message: { id: string; subject: string; previewText: string; label: string }
   template: { id: string; name: string; editorType: string; updated: string | null }
   definition: Json | null
+  /** Klaviyo's reason when it can't export the email's layout (the email can still be rebuilt). */
+  definitionError?: string
 }
 
 async function findCampaign(req: Request, input: string): Promise<{ campaign: Json; included: Json[] }> {
@@ -88,11 +90,19 @@ export async function loadCampaign(req: Request, input: { url?: string; campaign
   if (!templateId) throw new HttpError(422, 'This campaign’s email has no content yet. Clone a campaign that already has a drag-and-drop email.')
 
   let t: Json
+  let definitionError: string | undefined
   try {
     t = (await kGet(req, `/templates/${templateId}?additional-fields[template]=definition`)).data
   } catch (e) {
-    if (e instanceof HttpError && /failed to load definition/i.test(e.message)) throw new HttpError(422, definitionHelp(e.message))
-    scopeHint(e)
+    if (!(e instanceof HttpError && /failed to load definition/i.test(e.message))) scopeHint(e)
+    // Klaviyo can't export this layout (e.g. a header block it won't accept). The email can still be
+    // rebuilt from the slices, so load the template without its layout.
+    definitionError = klaviyoSaid((e as HttpError).message)
+    try {
+      t = (await kGet(req, `/templates/${templateId}`)).data
+    } catch (e2) {
+      scopeHint(e2)
+    }
   }
   const ta = t!.attributes ?? {}
   return {
@@ -100,7 +110,13 @@ export async function loadCampaign(req: Request, input: { url?: string; campaign
     message: { id: msg.id, subject: content.subject ?? '', previewText: content.preview_text ?? '', label: md.label ?? msg.attributes?.label ?? '' },
     template: { id: t!.id, name: ta.name ?? '', editorType: ta.editor_type ?? 'UNKNOWN', updated: ta.updated ?? null },
     definition: ta.definition ?? null,
+    definitionError,
   }
+}
+
+/** Klaviyo's own words from a "Failed to load definition" error. */
+export function klaviyoSaid(raw: string): string {
+  return raw.replace(/^[^:]*:\s*/, '').replace(/^Failed to load definition for template \w+:\s*/i, '').replace(/\s*@\s*\$\s*$/, '').trim()
 }
 
 /**
@@ -108,7 +124,7 @@ export async function loadCampaign(req: Request, input: { url?: string; campaign
  * its API doesn't accept (the editor tolerates it). Explain how to fix it in Klaviyo.
  */
 export function definitionHelp(raw: string): string {
-  const said = raw.replace(/^[^:]*:\s*/, '').replace(/^Failed to load definition for template \w+:\s*/i, '').replace(/\s*@\s*\$\s*$/, '').trim()
+  const said = klaviyoSaid(raw)
   const tail = ' Save, then click Load campaign again. Tip: make the same fix in the campaign or template you clone from (or the universal header block), so future clones load too.'
   if (/header block/i.test(said) && /logo/i.test(said)) {
     return (
@@ -125,14 +141,16 @@ export function definitionHelp(raw: string): string {
   )
 }
 
-function assertEditable(l: Loaded) {
+/** `needsLayout`: the change edits the current layout, so Klaviyo must be able to export it. */
+function assertEditable(l: Loaded, needsLayout = true) {
   if (!l.campaign.editable) throw new HttpError(409, `“${l.campaign.name}” is ${l.campaign.status}. Only Draft campaigns can be edited.`)
-  if (l.template.editorType !== 'SYSTEM_DRAGGABLE' || !l.definition) {
+  if (l.template.editorType !== 'SYSTEM_DRAGGABLE') {
     throw new HttpError(
       422,
       `This campaign’s email uses the ${l.template.editorType === 'CODE' ? 'HTML (code)' : l.template.editorType} editor. Only drag-and-drop emails can be updated block by block — clone a drag-and-drop campaign instead.`,
     )
   }
+  if (needsLayout && !l.definition) throw new HttpError(422, definitionHelp(l.definitionError ?? 'Klaviyo did not return the email’s layout.'))
 }
 
 /**
@@ -164,6 +182,51 @@ async function applyDefinition(req: Request, l: Loaded, definition: Json): Promi
   return { method: 'assign', templateId: rel.data?.id ?? tempId }
 }
 
+/** Names of the section background image the slices always get, in order of preference. */
+export const WHITE_BG = /^white[\s_-]*(bg|background)(\.[a-z]+)?$/i
+const whiteRank = (name: string) => (/bg/i.test(name) ? 0 : 1)
+
+/**
+ * Finds the “White_BG” / “White Background” image in the Klaviyo image library. Uses a name filter
+ * when Klaviyo accepts it, otherwise pages through the library.
+ */
+const backgroundCache = new Map<string, { at: number; value: SectionBackground | undefined }>()
+
+async function findWhiteBackground(req: Request): Promise<SectionBackground | undefined> {
+  // Looked up for the review and again for the send; keep it for a few minutes per account.
+  const key = headers(req).Authorization ?? ''
+  const cached = backgroundCache.get(key)
+  if (cached && Date.now() - cached.at < 5 * 60_000) return cached.value
+  const value = await lookupWhiteBackground(req)
+  backgroundCache.set(key, { at: Date.now(), value })
+  return value
+}
+
+async function lookupWhiteBackground(req: Request): Promise<SectionBackground | undefined> {
+  const pick = (items: Json[]) =>
+    items
+      .map((i) => ({ url: i.attributes?.image_url as string, assetId: String(i.id), name: String(i.attributes?.name ?? '') }))
+      .filter((i) => i.url && WHITE_BG.test(i.name.trim()))
+      .sort((a, b) => whiteRank(a.name) - whiteRank(b.name))[0]
+  try {
+    // "hite" matches both "White" and "white".
+    const body = await kGet(req, `/images?filter=${encodeURIComponent('contains(name,"hite")')}&page[size]=100`)
+    const hit = pick(body.data ?? [])
+    if (hit) return hit
+  } catch (e) {
+    if (e instanceof HttpError && (e.status === 401 || e.status === 403)) scopeHint(e)
+  }
+  let next: string | undefined = `${KLAVIYO_API}/images?page[size]=100`
+  for (let page = 0; next && page < 20; page++) {
+    const r = await fetchWithRetry(next, { headers: headers(req) })
+    const body = await readKlaviyo(r).catch((e) => scopeHint(e))
+    const hit = pick(body.data ?? [])
+    if (hit) return hit
+    next = body.links?.next ?? undefined
+  }
+  return undefined
+}
+
 export const campaignRouter = Router()
 
 /** Load a campaign from a pasted link and list its image blocks. */
@@ -174,6 +237,9 @@ campaignRouter.post('/resolve', async (req, res) => {
     message: l.message,
     template: { id: l.template.id, name: l.template.name, editorType: l.template.editorType, updated: l.template.updated },
     summary: l.definition ? summarize(l.definition) : null,
+    definitionError: l.definitionError,
+    // Saved by the app so emails Klaviyo can't export can still be rebuilt with the same settings/background.
+    skeleton: l.definition ? skeletonOf(l.definition) : undefined,
   })
 })
 
@@ -247,27 +313,38 @@ campaignRouter.post('/remove', async (req, res) => {
 /**
  * Preview (dryRun) or apply: remove the chosen image blocks and insert the slices in their place.
  * With no images chosen, `anchor` (from an earlier /remove) says where the slices go.
+ * With `all`, the email's whole content is replaced by the slices.
  */
 campaignRouter.post('/replace', async (req, res) => {
-  const { campaignId, removeKeys, rows, dryRun, templateUpdated, anchor } = req.body ?? {}
+  const { campaignId, rows, dryRun, templateUpdated, anchor, all, skeleton } = req.body ?? {}
+  const removeKeys = req.body?.removeKeys ?? []
   if (!campaignId || !Array.isArray(removeKeys) || !Array.isArray(rows)) throw new HttpError(400, 'campaignId, removeKeys and rows are required')
-  if (!removeKeys.length && !anchor) throw new HttpError(400, 'Pick the images to replace, or remove them first so the app knows where the slices go.')
+  if (!all && !removeKeys.length && !anchor) throw new HttpError(400, 'Pick the images to replace, or remove them first so the app knows where the slices go.')
   for (const r of rows as SliceRowInput[]) {
     if (!Array.isArray(r.cells) || !r.cells.length) throw new HttpError(400, 'Every row needs at least one cell')
     for (const c of r.cells) if (!dryRun && !/^https:\/\//.test(c.src ?? '')) throw new HttpError(400, 'Every slice must be uploaded to Klaviyo before updating the campaign.')
   }
   const l = await loadCampaign(req, { campaignId })
-  assertEditable(l)
+  assertEditable(l, !all)
+  const background = all ? await findWhiteBackground(req) : undefined
   checkFresh(l, templateUpdated)
   let result
   try {
-    result = removeKeys.length
+    result = all
+      ? replaceAll(l.definition ?? (skeleton?.definition?.body ? skeleton : DEFAULT_SKELETON), rows, background)
+      : removeKeys.length
       ? replaceImages(l.definition!, removeKeys, rows)
       : { ...insertRows(l.definition!, anchor as SliceAnchor, rows), removed: 0 }
   } catch (e) {
     throw new HttpError(409, (e as Error).message)
   }
-  const plan = { removed: result.removed, inserted: result.inserted, rows: result.rows, insertedAt: result.insertedAt, contentWidth: result.contentWidth, warnings: result.warnings }
+  if (all && !background) {
+    result.warnings.unshift(`No image named “White_BG” or “White Background” was found in your Klaviyo image library, so the section background image couldn’t be set. Upload it to Klaviyo with one of those names and send again.`)
+  }
+  if (all && !l.definition) {
+    result.warnings.unshift('Klaviyo can’t export this email’s layout, so its header and footer can’t be kept — the whole email is rebuilt. Add them back in Klaviyo after sending.')
+  }
+  const plan = { background: background?.name, kept: result.kept ?? 0, removed: result.removed, inserted: result.inserted, rows: result.rows, insertedAt: result.insertedAt, contentWidth: result.contentWidth, warnings: result.warnings }
   if (dryRun) return void res.json({ dryRun: true, ...plan })
 
   const applied = await applyDefinition(req, l, result.definition)

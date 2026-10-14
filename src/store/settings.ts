@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { DEFAULT_COMPRESS, type CompressOptions } from '@/lib/compress/types'
 import { DEFAULT_FOOTER_HTML } from '@/lib/html'
+import type { EmailSkeleton } from '@/lib/api'
 
 export type ScaleChoice = 'auto' | '1' | '2' | '3'
 export type Theme = 'light' | 'dark' | 'system'
@@ -20,6 +21,11 @@ export interface SettingsState {
   hideUploadsInLibrary: boolean
   theme: Theme
   recentFigmaUrls: { url: string; label: string }[]
+  /**
+   * Settings (incl. the White_BG section background) from the last campaign whose layout loaded,
+   * used to rebuild campaigns whose layout Klaviyo can't export.
+   */
+  emailSkeleton: EmailSkeleton | null
   set: (patch: Partial<Omit<SettingsState, 'set' | 'setCompress' | 'rememberUrl'>>) => void
   setCompress: (patch: Partial<CompressOptions>) => void
   rememberUrl: (url: string, label: string) => void
@@ -39,6 +45,7 @@ export const useSettings = create<SettingsState>()(
       hideUploadsInLibrary: false,
       theme: 'system',
       recentFigmaUrls: [],
+      emailSkeleton: null,
       set: (patch) => set(patch),
       setCompress: (patch) => set((s) => ({ compress: { ...s.compress, ...patch } })),
       rememberUrl: (url, label) =>
