@@ -6,6 +6,7 @@ import {
   CircleDashed,
   CloudUpload,
   Loader2,
+  Plus,
   RotateCw,
   Send,
   XCircle,
@@ -48,7 +49,7 @@ async function copy(text: string, what: string) {
 }
 
 export function UploadStep({ job }: { job: EmailJob }) {
-  const { uploadJob, setStep, patchJob, setLayout } = useWorkspace()
+  const { uploadJob, setStep, patchJob, setLayout, setView } = useWorkspace()
   const settings = useSettings()
   const health = useHealth()
   const { rows, stats } = useJobSlices(job)
@@ -70,6 +71,8 @@ export function UploadStep({ job }: { job: EmailJob }) {
   const unapproved = rows.filter((r) => !r.result?.approved)
   const uploading = rows.some((r) => r.upload?.status === 'uploading')
   const toCampaign = campaign.ready
+  /** Every approved slice is in Klaviyo: offer to move on to the next email. */
+  const sent = stats.approved > 0 && nothingToUpload && !stats.renamePending && !busy
   const canSend = stats.approved > 0 && stats.working === 0 && keyReady && !busy && !campaign.loading && (toCampaign || !nothingToUpload || stats.renamePending > 0)
 
   const openReview = async () => {
@@ -256,6 +259,11 @@ export function UploadStep({ job }: { job: EmailJob }) {
                   : `${nothingToUpload ? 'Approved slices are uploaded' : `Uploads ${pending} approved image${pending > 1 ? 's' : ''}`}${toCampaign ? ', then makes them the campaign’s email' : ''}. You’ll review everything before it’s sent. Klaviyo allows 100 uploads/min and 500/day; the local server paces requests for you.`}
               </div>
             </div>
+            {sent && (
+              <Button data-testid="start-another" size="lg" variant="outline" onClick={() => setView('import')}>
+                <Plus /> Start another email
+              </Button>
+            )}
             <Button data-testid="upload-start" size="lg" disabled={!canSend} onClick={() => (!toCampaign && nothingToUpload && !unapproved.length ? send() : openReview())}>
               {busy ? <Loader2 className="animate-spin" /> : !canSend && nothingToUpload ? <CheckCircle2 /> : toCampaign ? <Send /> : stats.uploadErrors ? <RotateCw /> : <CloudUpload />}
               {sendLabel}

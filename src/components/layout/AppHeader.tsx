@@ -16,25 +16,30 @@ export function AppHeader() {
   const view = useWorkspace((s) => s.view)
   const setView = useWorkspace((s) => s.setView)
   const setStep = useWorkspace((s) => s.setStep)
-  const job = useActiveJob()
+  const activeJob = useActiveJob()
+  // On the Import page you're starting a new email, so the later steps show no email until you
+  // import one or pick one from the sidebar.
+  const job = view === 'import' ? undefined : activeJob
   const { stats } = useJobSlices(job)
   const theme = useSettings((s) => s.theme)
   const setSettings = useSettings((s) => s.set)
 
   const ready = job?.status === 'ready' && !!job.layout
-  const current: StepId = view === 'import' || !job ? 'import' : job.step
+  const current: StepId = !job ? 'import' : job.step
   const allApproved = stats.total > 0 && stats.approved === stats.total
+
+  const noEmail = job ? undefined : 'Import an email, or pick one from the list on the left'
 
   const steps: { id: StepId; label: string; enabled: boolean; done: boolean; hint?: string }[] = [
     { id: 'import', label: 'Import', enabled: true, done: !!job },
-    { id: 'slice', label: 'Slice', enabled: ready, done: ready && job!.step !== 'slice' },
-    { id: 'optimize', label: 'Optimize & review', enabled: ready, done: allApproved },
+    { id: 'slice', label: 'Slice', enabled: ready, done: ready && job!.step !== 'slice', hint: noEmail },
+    { id: 'optimize', label: 'Optimize & review', enabled: ready, done: allApproved, hint: noEmail },
     {
       id: 'upload',
       label: 'Upload',
       enabled: ready && stats.approved > 0,
       done: stats.total > 0 && stats.uploaded === stats.total,
-      hint: 'Approve at least one slice first',
+      hint: noEmail ?? 'Approve at least one slice first',
     },
   ]
 
@@ -50,12 +55,17 @@ export function AppHeader() {
 
   return (
     <header className="bg-card flex h-14 shrink-0 items-center gap-4 border-b px-4">
-      <div className="flex items-center gap-2 font-semibold tracking-tight">
+      <button
+        className="flex cursor-pointer items-center gap-2 rounded-md font-semibold tracking-tight transition-opacity hover:opacity-80"
+        onClick={() => setView('import')}
+        title="Start another email"
+        aria-label="Email Slicer — start another email"
+      >
         <div className="bg-slice text-white flex size-7 items-center justify-center rounded-md">
           <Scissors className="size-4" />
         </div>
         <span className="hidden sm:inline">Email Slicer</span>
-      </div>
+      </button>
 
       <nav className="flex min-w-0 flex-1 items-center justify-center gap-1 overflow-x-auto" aria-label="Steps">
         {steps.map((s, i) => {
@@ -88,7 +98,7 @@ export function AppHeader() {
           return (
             <div key={s.id} className="flex items-center gap-1">
               {i > 0 && <ChevronRight className="text-muted-foreground/50 size-4 shrink-0" />}
-              {!s.enabled && s.hint && ready ? (
+              {!s.enabled && s.hint && (ready || !job) ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <span>{btn}</span>
