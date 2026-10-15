@@ -101,7 +101,10 @@ export async function loadCampaign(req: Request, input: { url?: string; campaign
     try {
       t = (await kGet(req, `/templates/${templateId}`)).data
     } catch (e2) {
-      scopeHint(e2)
+      if (!(e2 instanceof HttpError && /failed to load definition/i.test(e2.message))) scopeHint(e2)
+      // Klaviyo won't return this template at all. Only drag-and-drop templates have a layout to
+      // fail on, so that's what it is; its last-edited time is unknown.
+      t = { id: templateId, attributes: { editor_type: 'SYSTEM_DRAGGABLE' } }
     }
   }
   const ta = t!.attributes ?? {}
