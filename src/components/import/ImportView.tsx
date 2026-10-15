@@ -3,11 +3,17 @@ import { UploadImport } from './UploadImport'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Gauge, Layers, ShieldCheck, Upload } from 'lucide-react'
 
+// The app's steps at a glance. Keep in step with the app: update these whenever a step changes
+// (see CLAUDE.md).
 const PIPELINE = [
-  { icon: Layers, title: 'Layer-aware slicing', text: 'Cuts only where no text, button or image is crossed — straight from Figma layers.' },
+  { icon: Layers, title: 'Slices from Figma', text: 'Your Figma Slice layers become the slices, with their names. Areas they don’t cover are kept as “Unsliced area”.' },
   { icon: Gauge, title: 'Squoosh-grade compression', text: 'MozJPEG / OxiPNG in your browser, tuned to stay under your size ceiling.' },
-  { icon: ShieldCheck, title: 'Human approval gate', text: 'Compare every slice before/after. Nothing uploads until you approve.' },
-  { icon: Upload, title: 'Straight to Klaviyo', text: 'Uploads images, then builds the HTML and (optionally) a template.' },
+  { icon: ShieldCheck, title: 'Human approval gate', text: 'Compare every slice before/after. Only approved slices upload; unapproved ones are deleted when you send.' },
+  {
+    icon: Upload,
+    title: 'Straight to Klaviyo',
+    text: 'One Send, after a review: uploads the approved slices, then rebuilds your cloned draft campaign with them on the White_BG background.',
+  },
 ]
 
 export function ImportView() {
