@@ -156,23 +156,21 @@ export function CampaignUpdate({ job, campaign: c, keyReady, approved }: Props) 
                   Now: {info.summary.sections} section{info.summary.sections === 1 ? '' : 's'}, {info.summary.blocks} block{info.summary.blocks === 1 ? '' : 's'}
                   {info.summary.images.length ? ` (${info.summary.images.length} image${info.summary.images.length === 1 ? '' : 's'})` : ''}.
                 </span>{' '}
-                <b>Send to Klaviyo</b> replaces the content with your {approved} approved slice{approved === 1 ? '' : 's'}, each as a drag-and-drop image
-                block. Header and footer sections you add in Klaviyo stay (universal blocks, header blocks and the unsubscribe footer), so you can send again after
-                changing slices.
+                <b>Send to Klaviyo</b> removes all of it — header and footer included — and adds your {approved} approved slice{approved === 1 ? '' : 's'}, each
+                as a drag-and-drop image block, on the White_BG background.
               </p>
             )}
             {c.editorOk && info.definitionError && (
               <div className="grid gap-1 rounded-md border border-amber-500/40 bg-amber-500/5 p-2.5 text-sm" data-testid="campaign-no-layout">
                 <span>
-                  Klaviyo can’t export this email’s current layout, so the app can’t show what’s in it or keep its header and footer. <b>Send to Klaviyo</b>{' '}
-                  rebuilds the whole email from your {approved} approved slice{approved === 1 ? '' : 's'}; add the header and footer back in Klaviyo
-                  afterwards. To avoid this, fix the header block it mentions in the campaign you clone from.
+                  Klaviyo can’t export this email’s current layout, so the app can’t show what’s in it. That’s fine: <b>Send to Klaviyo</b> replaces all of
+                  it with your {approved} approved slice{approved === 1 ? '' : 's'} on the White_BG background.
                 </span>
                 <span className="text-muted-foreground text-xs">
                   Klaviyo says: “{info.definitionError}”.{' '}
                   {hasSkeleton
-                    ? 'The email settings and section background (e.g. White_BG) from the last campaign that loaded fully are reused.'
-                    : 'No earlier campaign settings are saved yet, so the slices go on a plain white background.'}
+                    ? 'The email width and colours from the last campaign that loaded fully are reused.'
+                    : 'No earlier campaign settings are saved yet, so a 600px email on white is used.'}
                 </span>
               </div>
             )}
@@ -184,7 +182,7 @@ export function CampaignUpdate({ job, campaign: c, keyReady, approved }: Props) 
             <CheckCircle2 className="text-success size-4" />
             <span>
               Updated {new Date(last.at).toLocaleString()}: the email content is now {last.inserted} slice row{last.inserted === 1 ? '' : 's'}. Send again after
-              changing slices; header and footer sections stay.
+              changing slices.
             </span>
           </div>
         )}

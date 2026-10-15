@@ -22,8 +22,8 @@ export interface SettingsState {
   theme: Theme
   recentFigmaUrls: { url: string; label: string }[]
   /**
-   * Settings (incl. the White_BG section background) from the last campaign whose layout loaded,
-   * used to rebuild campaigns whose layout Klaviyo can't export.
+   * Email settings (width, colours) from the last campaign whose layout loaded, used to rebuild
+   * campaigns whose layout Klaviyo can't export.
    */
   emailSkeleton: EmailSkeleton | null
   set: (patch: Partial<Omit<SettingsState, 'set' | 'setCompress' | 'rememberUrl'>>) => void

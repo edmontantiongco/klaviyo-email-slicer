@@ -25,9 +25,8 @@ export function useCampaign(job: EmailJob, keyReady: boolean) {
     try {
       const res = await api.klaviyoResolveCampaign(link.trim())
       setInfo(res)
-      // Remember settings with a section background (White_BG) for emails Klaviyo can't export later.
-      const bg = Object.keys((res.skeleton?.sectionData?.styles as object | undefined) ?? {}).some((k) => /background/i.test(k))
-      if (res.skeleton && bg) useSettings.getState().set({ emailSkeleton: res.skeleton })
+      // Remember the email settings for campaigns Klaviyo can't export later.
+      if (res.skeleton) useSettings.getState().set({ emailSkeleton: res.skeleton })
       saveLink({ url: link.trim(), campaignId: res.campaign.id, campaignName: res.campaign.name, templateUpdated: res.template.updated })
     } catch (e) {
       setInfo(null)

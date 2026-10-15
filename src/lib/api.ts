@@ -81,14 +81,13 @@ export interface CampaignInfo {
   } | null
   /** Klaviyo's reason when it can't export the email's layout. The email can still be rebuilt from the slices. */
   definitionError?: string
-  /** Email settings without content (incl. the section background), when the layout could be read. */
+  /** Email settings without content (width, colours), when the layout could be read. */
   skeleton?: EmailSkeleton
 }
 
 /** An email's settings without its content; used to rebuild emails whose layout Klaviyo can't export. */
 export interface EmailSkeleton {
   definition: Record<string, unknown>
-  sectionData?: Record<string, unknown>
 }
 
 export interface CampaignSliceRow {
@@ -106,8 +105,6 @@ export interface SliceAnchor {
 
 export interface CampaignReplaceResult {
   dryRun: boolean
-  /** Replace-all: header/footer sections left in place. */
-  kept?: number
   /** Replace-all: name of the library image set as the slices' section background (White_BG). */
   background?: string
   removed: number

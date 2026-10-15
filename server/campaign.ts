@@ -1,7 +1,7 @@
 import { Router, type Request } from 'express'
 import { HttpError, fetchWithRetry } from './http.ts'
 import { KLAVIYO_API, headers, readKlaviyo } from './klaviyo.ts'
-import { DEFAULT_SKELETON, type SectionBackground, idsFromKlaviyoUrl, insertRows, removeBlocks, replaceAll, replaceImages, skeletonOf, stripIds, summarize, swapImages, type ImageSwap, type SliceAnchor, type SliceRowInput } from './dnd.ts'
+import { DEFAULT_SKELETON, type SectionBackground, definitionForCreate, idsFromKlaviyoUrl, insertRows, removeBlocks, replaceAll, replaceImages, skeletonOf, summarize, swapImages, type ImageSwap, type SliceAnchor, type SliceRowInput } from './dnd.ts'
 import type { Json } from './dnd.ts'
 
 /**
@@ -159,17 +159,25 @@ function assertEditable(l: Loaded, needsLayout = true) {
  * (Klaviyo copies it), and deletes the temporary one.
  */
 async function applyDefinition(req: Request, l: Loaded, definition: Json): Promise<{ method: 'update' | 'assign'; templateId: string }> {
+  let updateRefused: string
   try {
     await kSend(req, 'PATCH', `/templates/${l.template.id}`, { data: { type: 'template', id: l.template.id, attributes: { definition } } })
     return { method: 'update', templateId: l.template.id }
   } catch (e) {
     if (e instanceof HttpError && (e.status === 401 || e.status === 403)) scopeHint(e)
     if (!(e instanceof HttpError) || e.status >= 500) throw e
+    updateRefused = e.message
     console.warn(`[campaign] direct template update refused (${e.status}: ${e.message}); falling back to assign`)
   }
-  const created = await kSend(req, 'POST', '/templates', {
-    data: { type: 'template', attributes: { name: `[Email Slicer] ${l.campaign.name}`.slice(0, 200), editor_type: 'SYSTEM_DRAGGABLE', definition: stripIds(definition) } },
-  })
+  let created: Json
+  try {
+    created = await kSend(req, 'POST', '/templates', {
+      data: { type: 'template', attributes: { name: `[Email Slicer] ${l.campaign.name}`.slice(0, 200), editor_type: 'SYSTEM_DRAGGABLE', definition: definitionForCreate(definition) } },
+    })
+  } catch (e) {
+    if (e instanceof HttpError) throw new HttpError(e.status, `Klaviyo refused the update (“${updateRefused}”) and the fallback (“${e.message}”).`)
+    throw e
+  }
   const tempId = created.data.id as string
   try {
     await kSend(req, 'POST', '/campaign-message-assign-template', {
@@ -342,9 +350,9 @@ campaignRouter.post('/replace', async (req, res) => {
     result.warnings.unshift(`No image named “White_BG” or “White Background” was found in your Klaviyo image library, so the section background image couldn’t be set. Upload it to Klaviyo with one of those names and send again.`)
   }
   if (all && !l.definition) {
-    result.warnings.unshift('Klaviyo can’t export this email’s layout, so its header and footer can’t be kept — the whole email is rebuilt. Add them back in Klaviyo after sending.')
+    result.warnings.unshift('Klaviyo can’t export this email’s layout, so the app couldn’t read its width and colours — it uses the last ones it saw (or 600px on white).')
   }
-  const plan = { background: background?.name, kept: result.kept ?? 0, removed: result.removed, inserted: result.inserted, rows: result.rows, insertedAt: result.insertedAt, contentWidth: result.contentWidth, warnings: result.warnings }
+  const plan = { background: background?.name, removed: result.removed, inserted: result.inserted, rows: result.rows, insertedAt: result.insertedAt, contentWidth: result.contentWidth, warnings: result.warnings }
   if (dryRun) return void res.json({ dryRun: true, ...plan })
 
   const applied = await applyDefinition(req, l, result.definition)

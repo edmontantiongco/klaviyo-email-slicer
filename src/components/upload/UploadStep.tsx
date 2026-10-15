@@ -296,7 +296,7 @@ export function UploadStep({ job }: { job: EmailJob }) {
                     In “{campaign.info?.campaign.name}”:{' '}
 {campaign.info?.definitionError
                       ? 'rebuild the whole email'
-                      : `replace ${review.plan.removed} content block${review.plan.removed === 1 ? '' : 's'}${review.plan.kept ? ` (keeping ${review.plan.kept} header/footer section${review.plan.kept === 1 ? '' : 's'})` : ''}`}{' '}
+                      : `remove all ${review.plan.removed} block${review.plan.removed === 1 ? '' : 's'} (header and footer included) and replace them`}{' '}
                     with {review.plan.inserted} slice row
                     {review.plan.inserted === 1 ? '' : 's'} ({describePlan(review.plan.rows)}), {review.plan.contentWidth}px wide
                   </Check>
