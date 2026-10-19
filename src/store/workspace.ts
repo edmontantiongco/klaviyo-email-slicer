@@ -591,6 +591,19 @@ function serialize(j: EmailJob): PersistedJob {
   return { ...rest, results: r }
 }
 
+/** Every approved slice is uploaded to Klaviyo: the email is done (same rule as the Upload step's “Start another email”). */
+export function isJobSent(job: EmailJob, compress: CompressOptions): boolean {
+  if (!job.layout) return false
+  const approved = getSlices(job.layout).filter((s) => currentResult(job, s, compress)?.approved)
+  return (
+    approved.length > 0 &&
+    approved.every((s) => {
+      const u = job.uploads[s.id]
+      return u?.status === 'done' && u.key === currentResult(job, s, compress)!.key
+    })
+  )
+}
+
 export async function hydrateWorkspace() {
   try {
     const saved = (await idbGet<PersistedJob[]>('jobs')) ?? []
@@ -607,10 +620,13 @@ export async function hydrateWorkspace() {
       }
       jobs.push({ ...p, imageBlob: blob, imageUrl: URL.createObjectURL(blob), bitmap, past: [], future: [], results })
     }
+    const active = jobs.find((j) => j.id === activeId) ?? jobs[0]
     useWorkspace.setState({
       jobs,
-      activeId: jobs.some((j) => j.id === activeId) ? activeId : (jobs[0]?.id ?? null),
-      view: jobs.length ? 'job' : 'import',
+      activeId: active?.id ?? null,
+      // Reopen an email that's still in progress at its step; once it's sent to Klaviyo, start on
+      // the Import page instead (the email stays in the sidebar).
+      view: active && !isJobSent(active, useSettings.getState().compress) ? 'job' : 'import',
       hydrated: true,
     })
   } catch (err) {
