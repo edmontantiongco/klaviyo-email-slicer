@@ -116,6 +116,8 @@ export interface CampaignReplaceResult {
   method?: 'update' | 'assign'
   templateId?: string
   templateUpdated?: string | null
+  /** Klaviyo refused a direct update, so the email was re-attached as a copy (universal blocks become regular ones). */
+  updateRefused?: string
   after?: CampaignInfo['summary']
 }
 
@@ -185,11 +187,11 @@ export const api = {
 
   klaviyoSwapCampaignImages: (body: {
     campaignId: string
-    swaps: { oldUrl: string; oldAssetId?: string; src: string; assetId?: string; href?: string; alt?: string }[]
+    swaps: { oldUrl: string; oldAssetId?: string; oldUrls?: string[]; oldAssetIds?: string[]; src: string; assetId?: string; href?: string; alt?: string }[]
     dryRun: boolean
     templateUpdated?: string | null
   }) =>
-    post<{ dryRun: boolean; applied: boolean; counts: number[]; templateId?: string; templateUpdated?: string | null; after?: CampaignInfo['summary'] }>(
+    post<{ dryRun: boolean; applied: boolean; counts: number[]; templateId?: string; templateUpdated?: string | null; updateRefused?: string; after?: CampaignInfo['summary'] }>(
       '/api/klaviyo/campaign/swap',
       body,
     ),

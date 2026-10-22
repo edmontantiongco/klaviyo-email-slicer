@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_SKELETON, buildRows, definitionForCreate, idsFromKlaviyoUrl, insertRows, matchColumnLayout, removeBlocks, replaceAll, replaceImages, skeletonOf, stripIds, summarize, swapImages, type Json } from './dnd.ts'
+import { DEFAULT_SKELETON, buildRows, definitionForCreate, definitionForUpdate, idsFromKlaviyoUrl, insertRows, matchColumnLayout, removeBlocks, replaceAll, replaceImages, skeletonOf, stripIds, summarize, swapImages, type Json } from './dnd.ts'
 
 const img = (id: string, src: string, href = '', extra: Json = {}): Json => ({
   id,
@@ -111,6 +111,40 @@ describe('replaceAll', () => {
     const out = definitionForCreate({ id: 'd', body: { sections: [{ id: 's', universal_id: 'U', rows: [{ columns: [{ blocks: [{ id: 'b', data: { properties: { src: 'x', cropping_properties: { a: 1 } } } }] }] }] }] } })
     expect(JSON.stringify(out)).not.toMatch(/cropping_properties|universal_id|"id"/)
     expect(out.body.sections[0].rows[0].columns[0].blocks[0].data.properties.src).toBe('x')
+  })
+})
+
+describe('revised slices only', () => {
+  it('swaps just the revised image and keeps everything added in Klaviyo (timer, universal footer)', () => {
+    const def = fixture()
+    const timer = { id: 'timer', type: 'html', data: { content: '<img src="https://timer.example/countdown.gif">' } }
+    def.body.sections[1].rows.push(row('1-column-full-width', [timer]))
+    def.body.sections[1].rows.push(row('1-column-full-width', [img('cropped', '', '', { data: { properties: { cropping_properties: { src: 'https://cdn/crop.jpg', x: 2 } }, styles: {} } })]))
+    const res = swapImages(def, [{ oldUrl: 'https://cdn/old2.jpg', src: 'https://k/old2-v2.jpg', assetId: 'A2' }])
+    expect(res.counts).toEqual([1])
+    const out = definitionForUpdate(res.definition)
+    const srcs = summarize(out).images.map((i) => i.src)
+    expect(srcs).toContain('https://k/old2-v2.jpg')
+    expect(srcs).not.toContain('https://cdn/old2.jpg')
+    expect(srcs).toEqual(expect.arrayContaining(['https://cdn/logo.png', 'https://cdn/old1.jpg', 'https://cdn/g1.jpg', 'https://cdn/social.png', 'https://cdn/crop.jpg']))
+    expect(out.body.sections).toHaveLength(3)
+    expect(out.body.sections[2].universal_id).toBe('U1')
+    expect(JSON.stringify(out)).toContain('countdown.gif')
+    expect(JSON.stringify(out)).not.toContain('cropping_properties')
+  })
+})
+
+describe('swap with earlier versions', () => {
+  it('finds a slice by any earlier upload, not just the first one recorded', () => {
+    const def = fixture()
+    // The email holds a later version (3.1) than the one first recorded (3).
+    def.body.sections[1].rows[0].columns[0].blocks[0].data.properties.src = 'https://k/kaye-3.1.jpg'
+    def.body.sections[1].rows[0].columns[0].blocks[0].data.properties.asset_id = 'A31'
+    const res = swapImages(def, [{ oldUrl: 'https://k/kaye-3.jpg', oldUrls: ['https://k/kaye-3.jpg', 'https://k/kaye-3.1.jpg'], src: 'https://k/kaye-3.2.jpg', assetId: 'A32' }])
+    expect(res.counts).toEqual([1])
+    expect(summarize(res.definition).images.map((i) => i.src)).toContain('https://k/kaye-3.2.jpg')
+    // Without the later version it isn't found (what happened before).
+    expect(swapImages(def, [{ oldUrl: 'https://k/kaye-3.jpg', src: 'https://k/x.jpg' }]).counts).toEqual([0])
   })
 })
 

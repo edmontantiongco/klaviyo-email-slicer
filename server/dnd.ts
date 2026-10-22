@@ -401,18 +401,32 @@ export function replaceAll(original: Json | EmailSkeleton, sliceRows: SliceRowIn
   return { ...ins, definition: forKlaviyo(ins.definition), removed: blocks, warnings }
 }
 
-/** Removes fields Klaviyo rejects when a definition is written (`cropping_properties`, `universal_id`). */
-export function forKlaviyo(def: Json): Json {
+/**
+ * Removes fields Klaviyo rejects when a definition is written: `cropping_properties` (on update
+ * and create) and, for create, `universal_id`. An image whose only `src` was inside its cropping
+ * settings keeps it as its `src`.
+ */
+export function forKlaviyo(def: Json, opts: { keepUniversal?: boolean } = {}): Json {
   const walk = (v: any): any => {
     if (Array.isArray(v)) return v.map(walk)
     if (v && typeof v === 'object') {
       const o: Json = {}
-      for (const [k, val] of Object.entries(v)) if (k !== 'cropping_properties' && k !== 'universal_id') o[k] = walk(val)
+      for (const [k, val] of Object.entries(v)) {
+        if (k === 'cropping_properties' || (k === 'universal_id' && !opts.keepUniversal)) continue
+        o[k] = walk(val)
+      }
+      const cropSrc = (v as Json).cropping_properties?.src
+      if (cropSrc && !o.src && 'cropping_properties' in v) o.src = cropSrc
       return o
     }
     return v
   }
   return walk(def)
+}
+
+/** A definition Klaviyo accepts as a template update: keeps ids and universal blocks. */
+export function definitionForUpdate(def: Json): Json {
+  return forKlaviyo(def, { keepUniversal: true })
 }
 
 /** A definition Klaviyo accepts when creating a template: no ids and no rejected fields. */
@@ -433,6 +447,9 @@ export interface ImageSwap {
   /** Image currently in the campaign (the URL Klaviyo gave the old upload). */
   oldUrl: string
   oldAssetId?: string
+  /** Every earlier upload of this slice; whichever is in the campaign is swapped. */
+  oldUrls?: string[]
+  oldAssetIds?: string[]
   /** Revised image. */
   src: string
   assetId?: string
@@ -462,7 +479,11 @@ export function swapImages(original: Json, swaps: ImageSwap[]): SwapResult {
           if (block.type === 'image') {
             const p = block?.data?.properties
             if (!p || p.dynamic === true) continue
-            const i = swaps.findIndex((sw) => (sw.oldUrl && p.src === sw.oldUrl) || (sw.oldAssetId && p.asset_id === sw.oldAssetId))
+            const i = swaps.findIndex(
+              (sw) =>
+                (p.src && [sw.oldUrl, ...(sw.oldUrls ?? [])].includes(p.src)) ||
+                (p.asset_id && [sw.oldAssetId, ...(sw.oldAssetIds ?? [])].filter(Boolean).includes(p.asset_id)),
+            )
             if (i < 0) continue
             const sw = swaps[i]
             p.src = sw.src
@@ -474,8 +495,9 @@ export function swapImages(original: Json, swaps: ImageSwap[]): SwapResult {
             counts[i]++
           } else if (block.type === 'html' && typeof block?.data?.content === 'string') {
             swaps.forEach((sw, i) => {
-              if (sw.oldUrl && block.data.content.includes(sw.oldUrl)) {
-                block.data.content = block.data.content.split(sw.oldUrl).join(sw.src)
+              for (const old of new Set([sw.oldUrl, ...(sw.oldUrls ?? [])].filter(Boolean))) {
+                if (!block.data.content.includes(old)) continue
+                block.data.content = block.data.content.split(old).join(sw.src)
                 counts[i]++
               }
             })

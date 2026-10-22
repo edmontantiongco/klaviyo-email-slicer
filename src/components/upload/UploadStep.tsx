@@ -26,6 +26,7 @@ import { useCampaign } from '@/hooks/useCampaign'
 import { useHealth } from '@/hooks/useHealth'
 import { useJobSlices } from '@/hooks/useJobStats'
 import type { CampaignReplaceResult } from '@/lib/api'
+import type { SwapResult } from '@/hooks/useCampaign'
 import { campaignRows, describePlan } from '@/lib/campaign'
 import { updateCell } from '@/lib/slicing'
 import { klaviyoImageName, sliceFileName, sliceIndexLabel } from '@/lib/naming'
@@ -43,6 +44,16 @@ function Check({ state, children }: { state: 'ok' | 'warn' | 'fail'; children: R
   )
 }
 
+/** Klaviyo refused a direct update, so the email was re-attached as a copy: say what that changes. */
+function warnIfCopied(updateRefused?: string) {
+  if (!updateRefused) return
+  toast.warning('Klaviyo saved this as a copy of the email', {
+    description: `It refused a direct update (“${updateRefused}”). Content is the same, but saved (universal) blocks like the footer are now regular blocks in this email.`,
+    duration: 30000,
+    closeButton: true,
+  })
+}
+
 async function copy(text: string, what: string) {
   await navigator.clipboard.writeText(text)
   toast.success(`${what} copied`)
@@ -55,7 +66,7 @@ export function UploadStep({ job }: { job: EmailJob }) {
   const { rows, stats } = useJobSlices(job)
   const [busy, setBusy] = useState(false)
   /** The review shown before anything is sent; `plan` is the campaign change (dry run). */
-  const [review, setReview] = useState<null | { loading: boolean; plan?: CampaignReplaceResult; error?: string }>(null)
+  const [review, setReview] = useState<null | { loading: boolean; plan?: CampaignReplaceResult; swap?: SwapResult; error?: string }>(null)
 
   const keyReady = !!settings.klaviyoKey || !!health.data?.klaviyoKeyConfigured
   const campaign = useCampaign(job, keyReady)
@@ -70,16 +81,28 @@ export function UploadStep({ job }: { job: EmailJob }) {
   /** Deleted from the app when sending, so only approved slices remain. */
   const unapproved = rows.filter((r) => !r.result?.approved)
   const uploading = rows.some((r) => r.upload?.status === 'uploading')
-  const toCampaign = campaign.ready
+  const mode = campaign.mode
+  const toCampaign = mode !== null
+  const revisedCount = campaign.revised.length
+  // Swapping needs the email's layout from Klaviyo, and every revised slice approved first.
+  const reviseBlocked =
+    mode === 'revise' &&
+    (campaign.info?.definitionError
+      ? 'Klaviyo can’t export this email, so single images can’t be swapped — fix the header block in Klaviyo and reload'
+      : campaign.revised.some((r) => !r.approved)
+        ? 'Approve the revised slices in Optimize & review first'
+        : null)
   /** Every approved slice is in Klaviyo: offer to move on to the next email. */
   const sent = stats.approved > 0 && nothingToUpload && !stats.renamePending && !busy
-  const canSend = stats.approved > 0 && stats.working === 0 && keyReady && !busy && !campaign.loading && (toCampaign || !nothingToUpload || stats.renamePending > 0)
+  const canSend =
+    stats.approved > 0 && stats.working === 0 && keyReady && !busy && !campaign.loading && !reviseBlocked && (toCampaign || !nothingToUpload || stats.renamePending > 0)
 
   const openReview = async () => {
     if (!toCampaign) return setReview({ loading: false })
     setReview({ loading: true })
     try {
-      setReview({ loading: false, plan: await campaign.replace(campaignRows(job, settings.compress).rows, true) })
+      if (mode === 'revise') setReview({ loading: false, swap: await campaign.swap(null, true) })
+      else setReview({ loading: false, plan: await campaign.replace(campaignRows(job, settings.compress).rows, true) })
     } catch (e) {
       setReview({ loading: false, error: (e as Error).message })
     }
@@ -106,10 +129,27 @@ export function UploadStep({ job }: { job: EmailJob }) {
         toast.success('Approved slices uploaded to Klaviyo', unapproved.length ? { description: `Deleted ${unapproved.length} unapproved slice${unapproved.length > 1 ? 's' : ''} from the app.` } : undefined)
         return
       }
+      if (mode === 'revise') {
+        const names = campaign.revised.map((r) => r.slice.meta.name)
+        const result = await campaign.swap(after, false)
+        campaign.swapped(result)
+        warnIfCopied(result.updateRefused)
+        const notFound = names.filter((_, i) => !result.counts[i])
+        const done = names.length - notFound.length
+        if (done) toast.success(`Updated ${done} revised slice${done === 1 ? '' : 's'} in the campaign`, { description: 'Everything else in the email stayed the same. Open it in Klaviyo to check, then send a test.' })
+        if (notFound.length)
+          toast.warning(`${notFound.join(', ')} ${notFound.length === 1 ? 'isn’t' : 'aren’t'} in this campaign`, {
+            description: 'Its old image wasn’t found in the email, so nothing was replaced for it. Add the new image in Klaviyo from the image library.',
+            duration: 30000,
+            closeButton: true,
+          })
+        return
+      }
       const { rows: sliceRows, missingUploads } = campaignRows(after, settings.compress)
       if (missingUploads) throw new Error(`${missingUploads} slice upload(s) are missing — retry them in the list above. The campaign was not changed.`)
       const result = await campaign.replace(sliceRows, false)
       campaign.applied(result)
+      warnIfCopied(result.updateRefused)
       toast.success('Sent to Klaviyo', {
         description: `The email is now ${result.inserted} slice row${result.inserted === 1 ? '' : 's'}. Open the campaign in Klaviyo to check, then send a test.`,
       })
@@ -120,10 +160,13 @@ export function UploadStep({ job }: { job: EmailJob }) {
     }
   }
 
-  const sendLabel = toCampaign
+  const sendLabel =
+    mode === 'revise'
+      ? `Update ${revisedCount} revised slice${revisedCount > 1 ? 's' : ''} in campaign`
+      : toCampaign
     ? nothingToUpload
-      ? 'Update campaign'
-      : `Upload ${pending} image${pending > 1 ? 's' : ''} & update campaign`
+      ? campaign.rebuild ? 'Rebuild email' : 'Update campaign'
+      : `Upload ${pending} image${pending > 1 ? 's' : ''} & ${campaign.rebuild ? 'rebuild email' : 'update campaign'}`
     : nothingToUpload && stats.renamePending
       ? `Update ${stats.renamePending} name${stats.renamePending > 1 ? 's' : ''} in Klaviyo`
       : nothingToUpload
@@ -256,7 +299,9 @@ export function UploadStep({ job }: { job: EmailJob }) {
               <div className="text-muted-foreground text-xs">
                 {!stats.approved
                   ? 'Approve at least one slice in Optimize & review first.'
-                  : `${nothingToUpload ? 'Approved slices are uploaded' : `Uploads ${pending} approved image${pending > 1 ? 's' : ''}`}${toCampaign ? ', then makes them the campaign’s email' : ''}. You’ll review everything before it’s sent. Klaviyo allows 100 uploads/min and 500/day; the local server paces requests for you.`}
+                  : reviseBlocked
+                    ? `${reviseBlocked}.`
+                    : `${nothingToUpload ? 'Approved slices are uploaded' : `Uploads ${pending} approved image${pending > 1 ? 's' : ''}`}${mode === 'revise' ? ', then swaps just the revised slices in the campaign' : mode === 'build' ? (campaign.rebuild ? ', then rebuilds the whole campaign email' : ', then makes them the campaign’s email') : ''}. You’ll review everything before it’s sent. Klaviyo allows 100 uploads/min and 500/day; the local server paces requests for you.`}
               </div>
             </div>
             {sent && (
@@ -315,13 +360,30 @@ export function UploadStep({ job }: { job: EmailJob }) {
                     </Check>
                   ))}
                 </>
+              ) : review?.swap ? (
+                <>
+                  <Check state="ok">
+                    In “{campaign.info?.campaign.name}”: swap the image of {campaign.revised.filter((_, i) => review.swap!.counts[i]).map((r) => `“${r.slice.meta.name}”`).join(', ') || 'no slices'}{' '}
+                    in place. Everything else in the email — text, timer, footer and anything you added in Klaviyo — stays as it is.
+                  </Check>
+                  {campaign.revised.some((_, i) => !review.swap!.counts[i]) && (
+                    <Check state="warn">
+                      Not found in the email, so not swapped:{' '}
+                      {campaign.revised
+                        .filter((_, i) => !review.swap!.counts[i])
+                        .map((r) => `“${r.slice.meta.name}”`)
+                        .join(', ')}
+                      . Add the new image in Klaviyo from the image library.
+                    </Check>
+                  )}
+                </>
               ) : null)}
           </ul>
           <DialogFooter>
             <Button variant="outline" onClick={() => setReview(null)}>
               Cancel
             </Button>
-            <Button data-testid="upload-confirm" onClick={send} disabled={toCampaign && (!review?.plan || review.loading)}>
+            <Button data-testid="upload-confirm" onClick={send} disabled={toCampaign && (!(review?.plan || review?.swap) || review.loading)}>
               {toCampaign ? <Send /> : <CloudUpload />} {toCampaign ? 'Send to Klaviyo' : 'Upload'}
             </Button>
           </DialogFooter>

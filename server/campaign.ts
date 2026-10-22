@@ -1,7 +1,7 @@
 import { Router, type Request } from 'express'
 import { HttpError, fetchWithRetry } from './http.ts'
 import { KLAVIYO_API, headers, readKlaviyo } from './klaviyo.ts'
-import { DEFAULT_SKELETON, type SectionBackground, definitionForCreate, idsFromKlaviyoUrl, insertRows, removeBlocks, replaceAll, replaceImages, skeletonOf, summarize, swapImages, type ImageSwap, type SliceAnchor, type SliceRowInput } from './dnd.ts'
+import { DEFAULT_SKELETON, type SectionBackground, definitionForCreate, definitionForUpdate, idsFromKlaviyoUrl, insertRows, removeBlocks, replaceAll, replaceImages, skeletonOf, summarize, swapImages, type ImageSwap, type SliceAnchor, type SliceRowInput } from './dnd.ts'
 import type { Json } from './dnd.ts'
 
 /**
@@ -161,10 +161,10 @@ function assertEditable(l: Loaded, needsLayout = true) {
  * if Klaviyo refuses, creates a temporary drag-and-drop template, assigns it to the message
  * (Klaviyo copies it), and deletes the temporary one.
  */
-async function applyDefinition(req: Request, l: Loaded, definition: Json): Promise<{ method: 'update' | 'assign'; templateId: string }> {
+async function applyDefinition(req: Request, l: Loaded, definition: Json): Promise<{ method: 'update' | 'assign'; templateId: string; updateRefused?: string }> {
   let updateRefused: string
   try {
-    await kSend(req, 'PATCH', `/templates/${l.template.id}`, { data: { type: 'template', id: l.template.id, attributes: { definition } } })
+    await kSend(req, 'PATCH', `/templates/${l.template.id}`, { data: { type: 'template', id: l.template.id, attributes: { definition: definitionForUpdate(definition) } } })
     return { method: 'update', templateId: l.template.id }
   } catch (e) {
     if (e instanceof HttpError && (e.status === 401 || e.status === 403)) scopeHint(e)
@@ -190,7 +190,7 @@ async function applyDefinition(req: Request, l: Loaded, definition: Json): Promi
     await kSend(req, 'DELETE', `/templates/${tempId}`).catch((err) => console.warn('[campaign] could not delete temporary template', tempId, err.message))
   }
   const rel = await kGet(req, `/campaign-messages/${l.message.id}/relationships/template`)
-  return { method: 'assign', templateId: rel.data?.id ?? tempId }
+  return { method: 'assign', templateId: rel.data?.id ?? tempId, updateRefused }
 }
 
 /** Names of the section background image the slices always get, in order of preference. */
@@ -285,6 +285,7 @@ campaignRouter.post('/swap', async (req, res) => {
     counts: result.counts,
     method: applied.method,
     templateId: applied.templateId,
+    updateRefused: applied.updateRefused,
     templateUpdated: after.template.updated,
     after: after.definition ? summarize(after.definition) : null,
   })
@@ -316,6 +317,7 @@ campaignRouter.post('/remove', async (req, res) => {
     warnings: result.warnings,
     method: applied.method,
     templateId: applied.templateId,
+    updateRefused: applied.updateRefused,
     templateUpdated: after.template.updated,
     after: after.definition ? summarize(after.definition) : null,
   })
@@ -366,6 +368,7 @@ campaignRouter.post('/replace', async (req, res) => {
     ...plan,
     method: applied.method,
     templateId: applied.templateId,
+    updateRefused: applied.updateRefused,
     templateUpdated: after.template.updated,
     after: after.definition ? summarize(after.definition) : null,
   })

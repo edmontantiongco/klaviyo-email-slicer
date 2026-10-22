@@ -12,7 +12,7 @@ const PIPELINE = [
   {
     icon: Upload,
     title: 'Straight to Klaviyo',
-    text: 'One Send, after a review: uploads the approved slices, then rebuilds your cloned draft campaign with them on the White_BG background.',
+    text: 'One Send, after a review: builds your cloned draft campaign from the approved slices on White_BG. Later Figma revisions swap just those slices, keeping what you added in Klaviyo.',
   },
 ]
 

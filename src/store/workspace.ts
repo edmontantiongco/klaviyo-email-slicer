@@ -104,6 +104,9 @@ export interface RevisionRecord {
   name: string
   oldUrl: string
   oldKlaviyoId?: string
+  /** Every upload this slice has had since the revision started; whichever is in the campaign gets swapped. */
+  oldUrls?: string[]
+  oldKlaviyoIds?: string[]
   at: number
 }
 
@@ -378,8 +381,18 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => {
           }
           changed.push(s.meta.name)
           const u = uploads[s.id]
-          // Remember the image that is in Klaviyo now (only the first time, until it is swapped).
-          if (u?.status === 'done' && u.url && !revisions[s.id]) revisions[s.id] = { name: s.meta.name, oldUrl: u.url, oldKlaviyoId: u.klaviyoId, at: Date.now() }
+          // Remember the images that may be in the campaign now: the first one recorded plus every
+          // later upload, so the swap finds whichever version the email holds.
+          if (u?.status === 'done' && u.url) {
+            const r = revisions[s.id]
+            if (!r) revisions[s.id] = { name: s.meta.name, oldUrl: u.url, oldKlaviyoId: u.klaviyoId, oldUrls: [u.url], oldKlaviyoIds: u.klaviyoId ? [u.klaviyoId] : [], at: Date.now() }
+            else
+              revisions[s.id] = {
+                ...r,
+                oldUrls: [...new Set([...(r.oldUrls ?? [r.oldUrl]), u.url])],
+                oldKlaviyoIds: [...new Set([...(r.oldKlaviyoIds ?? (r.oldKlaviyoId ? [r.oldKlaviyoId] : [])), ...(u.klaviyoId ? [u.klaviyoId] : [])])],
+              }
+          }
           if (results[s.id]?.url) URL.revokeObjectURL(results[s.id].url!)
           delete results[s.id]
           delete uploads[s.id]

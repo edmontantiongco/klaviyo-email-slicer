@@ -1,16 +1,11 @@
-import { useMemo, useState } from 'react'
-import { CheckCircle2, CircleDashed, ExternalLink, Frame, Loader2, Megaphone, RefreshCw, Replace } from 'lucide-react'
-import { toast } from 'sonner'
+import { AlertTriangle, CheckCircle2, CircleDashed, ExternalLink, Frame, Loader2, Megaphone, RefreshCw, RotateCcw, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { api } from '@/lib/api'
 import { useSettings } from '@/store/settings'
-import { currentResult, useWorkspace, type EmailJob } from '@/store/workspace'
-import { getSlices } from '@/lib/slicing'
+import type { EmailJob } from '@/store/workspace'
 import type { CampaignState } from '@/hooks/useCampaign'
 
 interface Props {
@@ -26,56 +21,12 @@ interface Props {
  * Send button does the rest, keeping the email in the drag-and-drop editor.
  */
 export function CampaignUpdate({ job, campaign: c, keyReady, approved }: Props) {
-  const { patchJob, uploadJob } = useWorkspace()
-  const compress = useSettings((s) => s.compress)
-  const [swapping, setSwapping] = useState(false)
-  const [confirmSwap, setConfirmSwap] = useState(false)
-  const { info } = c
+  const { info, revised } = c
   const hasSkeleton = useSettings((s) => !!s.emailSkeleton)
-  const canEdit = !!info && !c.problem
-
-  // Slices revised in Figma since they were uploaded (set by "Refresh from Figma").
-  const revised = useMemo(() => {
-    if (!job.layout || !job.revisions) return []
-    return getSlices(job.layout)
-      .filter((s) => job.revisions![s.id])
-      .map((s) => ({ slice: s, rev: job.revisions![s.id], approved: !!currentResult(job, s, compress)?.approved }))
-  }, [job, compress])
-  const revisedReady = revised.length > 0 && revised.every((r) => r.approved)
-
-  const swapRevised = async () => {
-    if (!info) return
-    setConfirmSwap(false)
-    setSwapping(true)
-    try {
-      await uploadJob(job.id) // uploads the approved revisions (and syncs names)
-      const after = useWorkspace.getState().jobs.find((j) => j.id === job.id)!
-      const swaps = revised.map(({ slice, rev }) => {
-        const r = currentResult(after, slice, compress)
-        const u = after.uploads[slice.id]
-        if (!r || u?.status !== 'done' || u.key !== r.key || !u.url) throw new Error(`“${slice.meta.name}” isn’t uploaded yet — check the slice list above.`)
-        return { oldUrl: rev.oldUrl, oldAssetId: rev.oldKlaviyoId, src: u.url, assetId: u.klaviyoId, href: slice.meta.link.trim(), alt: slice.meta.alt.trim() }
-      })
-      const result = await api.klaviyoSwapCampaignImages({ campaignId: info.campaign.id, swaps, dryRun: false, templateUpdated: info.template.updated })
-      const notFound = revised.filter((_, i) => !result.counts[i]).map((r) => r.slice.meta.name)
-      const done = revised.length - notFound.length
-      // Clear the revisions that were handled; ones not found aren't in this campaign, so clear them too.
-      patchJob(job.id, { revisions: {} })
-      if (result.applied) {
-        c.saveLink({ templateUpdated: result.templateUpdated ?? null })
-        c.setInfo({ ...info, template: { ...info.template, id: result.templateId ?? info.template.id, updated: result.templateUpdated ?? null }, summary: result.after ?? info.summary })
-      }
-      if (done) toast.success(`Updated ${done} revised slice${done === 1 ? '' : 's'} in the campaign`, { description: 'Open it in Klaviyo to check, then send a test.' })
-      if (notFound.length)
-        toast.warning(`${notFound.join(', ')} ${notFound.length === 1 ? 'isn’t' : 'aren’t'} in this campaign`, {
-          description: 'Its old image wasn’t found in the email, so nothing was replaced for it. Use Send to Klaviyo to rebuild the email from the slices.',
-        })
-    } catch (e) {
-      toast.error('Could not update the revised slices', { description: (e as Error).message })
-    } finally {
-      setSwapping(false)
-    }
-  }
+  // Slices added or removed in Figma since the email was built: updating revised slices can't place
+  // or remove those, so say what to do.
+  const added = c.built && !c.rebuild ? (job.lastRefresh?.added ?? []) : []
+  const removed = c.built && !c.rebuild ? (job.lastRefresh?.removed ?? []) : []
 
   const last = job.campaign?.lastUpdate
 
@@ -86,8 +37,9 @@ export function CampaignUpdate({ job, campaign: c, keyReady, approved }: Props) 
           <Megaphone className="size-4" /> Cloned campaign <span className="text-muted-foreground text-sm font-normal">(optional)</span>
         </CardTitle>
         <CardDescription>
-          Paste the link to your cloned <b>draft</b> campaign. <b>Send to Klaviyo</b> then uploads the approved slices and makes them the whole email,
-          each as a drag-and-drop image block. Leave it empty to only upload the images.
+          Paste the link to your cloned <b>draft</b> campaign. The first <b>Send to Klaviyo</b> makes the approved slices the whole email, each as a
+          drag-and-drop image block. After that, slices you revise in Figma are swapped in place, so anything you add in Klaviyo (timer, footer…) stays.
+          Leave it empty to only upload the images.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4">
@@ -126,15 +78,36 @@ export function CampaignUpdate({ job, campaign: c, keyReady, approved }: Props) 
                 </li>
               ))}
             </ul>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button size="sm" onClick={() => setConfirmSwap(true)} disabled={!canEdit || !revisedReady || !keyReady || swapping} data-testid="campaign-swap">
-                {swapping ? <Loader2 className="animate-spin" /> : <Replace />}
-                Update {revised.length} revised slice{revised.length === 1 ? '' : 's'} in campaign
-              </Button>
-              <span className="text-muted-foreground text-xs">
-                {!info ? 'Load the campaign first.' : !revisedReady ? 'Approve the revised slices first.' : 'Only these images change; their position and everything else stay the same.'}
+            <span className="text-muted-foreground text-xs">
+              {c.mode === 'revise'
+                ? 'Send to Klaviyo uploads these and swaps just their images in the campaign. Their position and everything else in the email stay the same.'
+                : !info
+                  ? 'Load the campaign to update just these images in it.'
+                  : 'These go in with the rest of the slices when the email is built.'}
+            </span>
+          </div>
+        )}
+
+        {(added.length > 0 || removed.length > 0) && (
+          <div className="grid gap-1 rounded-lg border p-3 text-xs" data-testid="campaign-added-removed">
+            {added.length > 0 && (
+              <span className="flex items-start gap-1.5">
+                <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-500" />
+                <span>
+                  New in Figma: <b>{added.join(', ')}</b>. Their images are uploaded, but only revised slices are swapped in the campaign — add them in
+                  Klaviyo from the image library, or rebuild the whole email.
+                </span>
               </span>
-            </div>
+            )}
+            {removed.length > 0 && (
+              <span className="flex items-start gap-1.5">
+                <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-500" />
+                <span>
+                  Removed in Figma: <b>{removed.join(', ')}</b>. {removed.length === 1 ? 'It’s' : 'They’re'} still in the campaign — delete{' '}
+                  {removed.length === 1 ? 'it' : 'them'} in Klaviyo, or rebuild the whole email.
+                </span>
+              </span>
+            )}
           </div>
         )}
 
@@ -156,15 +129,47 @@ export function CampaignUpdate({ job, campaign: c, keyReady, approved }: Props) 
                   Now: {info.summary.sections} section{info.summary.sections === 1 ? '' : 's'}, {info.summary.blocks} block{info.summary.blocks === 1 ? '' : 's'}
                   {info.summary.images.length ? ` (${info.summary.images.length} image${info.summary.images.length === 1 ? '' : 's'})` : ''}.
                 </span>{' '}
-                <b>Send to Klaviyo</b> removes all of it — header and footer included — and adds your {approved} approved slice{approved === 1 ? '' : 's'}, each
-                as a drag-and-drop image block, on the White_BG background.
+                {c.mode === 'build' ? (
+                  <>
+                    <b>Send to Klaviyo</b> removes all of it — header and footer included — and adds your {approved} approved slice
+                    {approved === 1 ? '' : 's'}, each as a drag-and-drop image block, on the White_BG background.
+                  </>
+                ) : (
+                  <>Built from the slices already; Send only swaps slices you revise in Figma.</>
+                )}
               </p>
+            )}
+            {c.built && c.editorOk && (
+              <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="campaign-rebuild">
+                {c.rebuild ? (
+                  <>
+                    <span className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+                      <AlertTriangle className="size-3.5" /> Rebuild on: Send removes everything in this email, including what you added in Klaviyo (timer,
+                      footer…).
+                    </span>
+                    <Button variant="ghost" size="sm" className="h-7" onClick={() => c.setRebuild(false)}>
+                      <X /> Keep my additions
+                    </Button>
+                  </>
+                ) : (
+                  <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => c.setRebuild(true)}>
+                    <RotateCcw /> Rebuild whole email…
+                  </Button>
+                )}
+              </div>
             )}
             {c.editorOk && info.definitionError && (
               <div className="grid gap-1 rounded-md border border-amber-500/40 bg-amber-500/5 p-2.5 text-sm" data-testid="campaign-no-layout">
                 <span>
-                  Klaviyo can’t export this email’s current layout, so the app can’t show what’s in it. That’s fine: <b>Send to Klaviyo</b> replaces all of
-                  it with your {approved} approved slice{approved === 1 ? '' : 's'} on the White_BG background.
+                  Klaviyo can’t export this email’s current layout, so the app can’t show what’s in it
+                  {c.mode === 'build' ? (
+                    <>
+                      . That’s fine: <b>Send to Klaviyo</b> replaces all of it with your {approved} approved slice{approved === 1 ? '' : 's'} on the White_BG
+                      background.
+                    </>
+                  ) : (
+                    <> or swap single images in it — fix the header block it mentions in Klaviyo, then click Reload.</>
+                  )}
                 </span>
                 <span className="text-muted-foreground text-xs">
                   Klaviyo says: “{info.definitionError}”.{' '}
@@ -181,33 +186,13 @@ export function CampaignUpdate({ job, campaign: c, keyReady, approved }: Props) 
           <div className="flex flex-wrap items-center gap-2 rounded-lg border p-3 text-sm" data-testid="campaign-done">
             <CheckCircle2 className="text-success size-4" />
             <span>
-              Updated {new Date(last.at).toLocaleString()}: the email content is now {last.inserted} slice row{last.inserted === 1 ? '' : 's'}. Send again after
-              changing slices.
+              Built {new Date(last.at).toLocaleString()} from {last.inserted} slice row{last.inserted === 1 ? '' : 's'}. Revise slices in Figma, click{' '}
+              <b>Refresh from Figma</b>, approve them, and Send swaps just those.
             </span>
           </div>
         )}
       </CardContent>
 
-      <Dialog open={confirmSwap} onOpenChange={setConfirmSwap}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              Update {revised.length} revised slice{revised.length === 1 ? '' : 's'} in “{info?.campaign.name}”?
-            </DialogTitle>
-            <DialogDescription>
-              The new version{revised.length === 1 ? ' is' : 's are'} uploaded, then each old image in the draft is replaced in place:{' '}
-              {revised.map((r) => r.slice.meta.name).join(', ')}. Nothing else in the email changes, and nothing is scheduled or sent. This can’t be undone
-              from the app.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmSwap(false)}>Cancel</Button>
-            <Button onClick={swapRevised} data-testid="campaign-swap-confirm">
-              <Replace /> Update in campaign
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </Card>
   )
 }
