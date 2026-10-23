@@ -46,6 +46,9 @@ export interface SliceCellInput {
   alt: string
   /** Fraction of the row width this cell occupies (0–1). */
   fraction: number
+  /** The slice's size in image pixels, to give table images their height. */
+  width?: number
+  height?: number
 }
 
 export interface SliceRowInput {
@@ -55,8 +58,10 @@ export interface SliceRowInput {
 export interface ReplacePlanRow {
   index: number
   cells: number
-  mode: 'image' | 'columns' | 'html'
+  mode: 'image' | 'columns' | 'html' | 'table'
   columnLayout?: string
+  /** 'table': how many slice rows the table holds. */
+  tableRows?: number
 }
 
 export interface ReplaceResult {
@@ -193,14 +198,85 @@ function htmlRowBlock(row: SliceRowInput, widthPx: number): Json {
   }
 }
 
+/** Side-by-side slices of equal width (e.g. a product grid row), which go in a table block. */
+export function isGridRow(row: SliceRowInput, tolerance = 0.01): boolean {
+  const n = row.cells.length
+  return n >= 2 && n <= 4 && row.cells.every((c) => Math.abs(c.fraction - 1 / n) <= tolerance)
+}
+
+/**
+ * A Klaviyo table block holding a product grid: one image cell per slice, `columns` per row, each
+ * with its link and alt text. Unlike column rows, tables keep the grid side by side on phones.
+ * No header row (Klaviyo only allows header cells when `show_headers` is on), no borders/padding.
+ */
+function tableBlock(rows: SliceRowInput[], columns: number, contentWidth: number): Json {
+  const cellWidth = Math.floor(contentWidth / columns)
+  const none = { style: 'solid', width: 0 }
+  return {
+    content_type: 'block',
+    type: 'table',
+    data: {
+      properties: { dynamic: false, num_columns: columns, show_headers: false },
+      display_options: { show_on: 'all' },
+      styles: {
+        ...ZERO_PADDING,
+        cell_padding_top: 0,
+        cell_padding_bottom: 0,
+        cell_padding_left: 0,
+        cell_padding_right: 0,
+        cell_vertical_align: 'top',
+        cell_horizontal_border_style: none.style,
+        cell_horizontal_border_width: none.width,
+        cell_vertical_border_style: none.style,
+        cell_vertical_border_width: none.width,
+        header_padding_top: 0,
+        header_padding_bottom: 0,
+        header_padding_left: 0,
+        header_padding_right: 0,
+      },
+    },
+    subblocks: [
+      ...rows.flatMap((row) =>
+        row.cells.map((c) => ({
+          type: 'table_image',
+          dynamic: false,
+          src: c.src,
+          ...(c.assetId ? { asset_id: c.assetId } : {}),
+          alt_text: c.alt,
+          href: c.href,
+          width: cellWidth,
+          ...(c.width && c.height ? { height: Math.round((cellWidth * c.height) / c.width) } : {}),
+          image_width: cellWidth,
+          image_align: 'center',
+          cell_text_align: 'center',
+          show_on: 'all',
+        })),
+      ),
+    ],
+  }
+}
+
 export function buildRows(rows: SliceRowInput[], contentWidth: number): { rows: Json[]; plan: ReplacePlanRow[] } {
   const out: Json[] = []
   const plan: ReplacePlanRow[] = []
-  rows.forEach((row, index) => {
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index]
+    // A product grid: this row and the following rows with the same number of equal-width
+    // slices become one table.
+    if (isGridRow(row)) {
+      const n = row.cells.length
+      let end = index + 1
+      while (end < rows.length && rows[end].cells.length === n && isGridRow(rows[end])) end++
+      const grid = rows.slice(index, end)
+      out.push({ data: { styles: { column_layout: '1-column-full-width' } }, columns: [{ data: {}, blocks: [tableBlock(grid, n, contentWidth)] }] })
+      plan.push({ index, cells: grid.reduce((a, r) => a + r.cells.length, 0), mode: 'table', tableRows: grid.length })
+      index = end - 1
+      continue
+    }
     if (row.cells.length === 1) {
       out.push({ data: { styles: { column_layout: '1-column-full-width' } }, columns: [{ data: {}, blocks: [imageBlock(row.cells[0], contentWidth)] }] })
       plan.push({ index, cells: 1, mode: 'image', columnLayout: '1-column-full-width' })
-      return
+      continue
     }
     const layout = matchColumnLayout(row.cells.map((c) => c.fraction))
     if (layout) {
@@ -215,7 +291,7 @@ export function buildRows(rows: SliceRowInput[], contentWidth: number): { rows: 
       out.push({ data: { styles: { column_layout: '1-column-full-width' } }, columns: [{ data: {}, blocks: [htmlRowBlock(row, contentWidth)] }] })
       plan.push({ index, cells: row.cells.length, mode: 'html' })
     }
-  })
+  }
   return { rows: out, plan }
 }
 
@@ -493,6 +569,24 @@ export function swapImages(original: Json, swaps: ImageSwap[]): SwapResult {
             if (sw.href !== undefined) p.href = sw.href
             if (sw.alt !== undefined) p.alt_text = sw.alt
             counts[i]++
+          } else if (block.type === 'table' && Array.isArray(block.subblocks)) {
+            // Product grid tables: each image cell is a `table_image` subblock.
+            for (const cell of block.subblocks as Json[]) {
+              if (cell.type !== 'table_image' || cell.dynamic === true) continue
+              const i = swaps.findIndex(
+                (sw) =>
+                  (cell.src && [sw.oldUrl, ...(sw.oldUrls ?? [])].includes(cell.src)) ||
+                  (cell.asset_id && [sw.oldAssetId, ...(sw.oldAssetIds ?? [])].filter(Boolean).includes(cell.asset_id)),
+              )
+              if (i < 0) continue
+              const sw = swaps[i]
+              cell.src = sw.src
+              if (sw.assetId) cell.asset_id = sw.assetId
+              else delete cell.asset_id
+              if (sw.href !== undefined) cell.href = sw.href
+              if (sw.alt !== undefined) cell.alt_text = sw.alt
+              counts[i]++
+            }
           } else if (block.type === 'html' && typeof block?.data?.content === 'string') {
             swaps.forEach((sw, i) => {
               for (const old of new Set([sw.oldUrl, ...(sw.oldUrls ?? [])].filter(Boolean))) {

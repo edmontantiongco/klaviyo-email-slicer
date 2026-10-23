@@ -27,6 +27,8 @@ export function campaignRows(job: EmailJob, compress: CompressOptions): { rows: 
             href: s.meta.link.trim(),
             alt: s.meta.alt.trim(),
             fraction: s.width / job.layout!.width,
+            width: s.width,
+            height: s.height,
           }
         }),
     }))
@@ -34,11 +36,16 @@ export function campaignRows(job: EmailJob, compress: CompressOptions): { rows: 
   return { rows, missingUploads }
 }
 
-export function describePlan(rows: { mode: 'image' | 'columns' | 'html'; cells: number }[]) {
+export function describePlan(rows: { mode: 'image' | 'columns' | 'html' | 'table'; cells: number }[]) {
   const single = rows.filter((r) => r.mode === 'image').length
   const cols = rows.filter((r) => r.mode === 'columns')
   const html = rows.filter((r) => r.mode === 'html').length
+  const tables = rows.filter((r) => r.mode === 'table')
   const parts = [`${single} full-width image${single === 1 ? '' : 's'}`]
+  if (tables.length)
+    parts.push(
+      `${tables.length} product grid table${tables.length === 1 ? '' : 's'} (${tables.reduce((a, t) => a + t.cells, 0)} product${tables.reduce((a, t) => a + t.cells, 0) === 1 ? '' : 's'})`,
+    )
   if (cols.length) parts.push(`${cols.length} multi-column row${cols.length === 1 ? '' : 's'}`)
   if (html) parts.push(`${html} HTML block row${html === 1 ? '' : 's'}`)
   return parts.join(', ')

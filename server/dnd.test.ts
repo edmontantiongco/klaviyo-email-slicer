@@ -148,6 +148,35 @@ describe('swap with earlier versions', () => {
   })
 })
 
+describe('product grid tables', () => {
+  const cell = (n: string, extra: Json = {}) => ({ src: `https://k/${n}.jpg`, assetId: n, href: `https://x/${n}`, alt: n, fraction: 0.5, width: 600, height: 697, ...extra })
+
+  it('puts consecutive 2-up rows in one 2×2 table, with heights from the slice size', () => {
+    const { rows, plan } = buildRows(
+      [{ cells: [cell('liza'), cell('milo')] }, { cells: [cell('nova'), cell('kyoto')] }, { cells: [{ src: 'https://k/b.jpg', href: '', alt: '', fraction: 1 }] }],
+      600,
+    )
+    expect(plan.map((p) => [p.mode, p.cells, p.tableRows])).toEqual([['table', 4, 2], ['image', 1, undefined]])
+    const imgs = rows[0].columns[0].blocks[0].subblocks.filter((b: Json) => b.type === 'table_image')
+    expect(imgs.map((c: Json) => c.alt_text)).toEqual(['liza', 'milo', 'nova', 'kyoto'])
+    expect(imgs[0]).toMatchObject({ width: 300, height: 349, asset_id: 'liza', href: 'https://x/liza' })
+  })
+
+  it('keeps unequal splits out of tables', () => {
+    expect(buildRows([{ cells: [cell('a', { fraction: 0.4 }), cell('b', { fraction: 0.6 })] }], 600).plan[0].mode).toBe('html')
+  })
+
+  it('swaps a revised product inside a table', () => {
+    const def = fixture()
+    def.body.sections[1].rows = buildRows([{ cells: [cell('liza'), cell('milo')] }], 600).rows
+    const res = swapImages(def, [{ oldUrl: 'https://k/milo.jpg', src: 'https://k/milo-v2.jpg', assetId: 'M2', href: 'https://x/milo2', alt: 'Milo v2' }])
+    expect(res.counts).toEqual([1])
+    const imgs = res.definition.body.sections[1].rows[0].columns[0].blocks[0].subblocks.filter((b: Json) => b.type === 'table_image')
+    expect(imgs[1]).toMatchObject({ src: 'https://k/milo-v2.jpg', asset_id: 'M2', href: 'https://x/milo2', alt_text: 'Milo v2' })
+    expect(imgs[0].src).toBe('https://k/liza.jpg')
+  })
+})
+
 describe('column presets', () => {
   it('matches Klaviyo presets within tolerance', () => {
     expect(matchColumnLayout([0.5, 0.5])).toBe('2-columns-equal-width')
@@ -157,14 +186,18 @@ describe('column presets', () => {
     // 203/195/202 px of 600 is too far from equal thirds for images to line up
     expect(matchColumnLayout([203 / 600, 195 / 600, 202 / 600])).toBeNull()
   })
-  it('builds native image blocks with zero padding, or an exact HTML block', () => {
+  it('builds native image blocks with zero padding, a table for equal-width grids, or an exact HTML block', () => {
     const { rows, plan } = buildRows(slices, 600)
-    expect(plan.map((p) => p.mode)).toEqual(['image', 'columns', 'html'])
+    expect(plan.map((p) => p.mode)).toEqual(['image', 'table', 'html'])
     const hero = rows[0].columns[0].blocks[0]
     expect(hero).toMatchObject({ type: 'image', data: { properties: { src: 'https://k/new1.jpg', asset_id: 'A1', href: 'https://x/1', alt_text: 'Hero', dynamic: false } } })
     expect(hero.data.styles).toMatchObject({ width: 600, block_padding_top: 0, block_padding_bottom: 0, block_padding_left: 0, block_padding_right: 0 })
-    expect(rows[1].data.styles.column_layout).toBe('3-columns-equal-width')
-    expect(rows[1].columns.map((c: Json) => c.blocks[0].data.styles.width)).toEqual([200, 200, 200])
+    const table = rows[1].columns[0].blocks[0]
+    expect(table).toMatchObject({ type: 'table', data: { properties: { num_columns: 3, show_headers: false } } })
+    const cells = table.subblocks.filter((b: Json) => b.type === 'table_image')
+    expect(cells.map((c: Json) => [c.src, c.href, c.alt_text, c.width])).toEqual([0, 1, 2].map((i) => [`https://k/c${i}.jpg`, `https://x/c${i}`, `Cat ${i}`, 200]))
+    // Klaviyo rejects header cells when show_headers is off.
+    expect(table.subblocks.filter((b: Json) => b.type === 'table_header')).toHaveLength(0)
     const html = rows[2].columns[0].blocks[0]
     expect(html.type).toBe('html')
     expect(html.data.content).toContain('width="240"')
@@ -182,7 +215,8 @@ describe('replaceImages', () => {
     expect(JSON.stringify(def)).toBe(before) // input untouched
 
     const s = summarize(r.definition)
-    expect(s.images.map((i) => i.blockId ?? i.src)).toEqual(['logo', 'https://k/new1.jpg', 'https://k/c0.jpg', 'https://k/c1.jpg', 'https://k/c2.jpg', 'social'])
+    expect(s.images.map((i) => i.blockId ?? i.src)).toEqual(['logo', 'https://k/new1.jpg', 'social'])
+    expect(JSON.stringify(r.definition)).toContain('https://k/c2.jpg') // in the grid table
     const content = r.definition.body.sections[1]
     expect(content.id).toBe('content')
     // new rows sit where old1 was; the emptied rows are gone; the text row stays last

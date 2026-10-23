@@ -91,7 +91,7 @@ export interface EmailSkeleton {
 }
 
 export interface CampaignSliceRow {
-  cells: { src: string; assetId?: string; href: string; alt: string; fraction: number }[]
+  cells: { src: string; assetId?: string; href: string; alt: string; fraction: number; width?: number; height?: number }[]
 }
 
 /** Where the slices go after images were removed on their own (saved by earlier versions of the app). */
@@ -109,7 +109,7 @@ export interface CampaignReplaceResult {
   background?: string
   removed: number
   inserted: number
-  rows: { index: number; cells: number; mode: 'image' | 'columns' | 'html'; columnLayout?: string }[]
+  rows: { index: number; cells: number; mode: 'image' | 'columns' | 'html' | 'table'; columnLayout?: string; tableRows?: number }[]
   insertedAt: { section: number; row: number }
   contentWidth: number
   warnings: string[]
