@@ -266,10 +266,12 @@ export function UploadStep({ job }: { job: EmailJob }) {
                       <SettingsDialog trigger={<button className="ml-1 underline">Add key</button>} />
                     )}
                   </Check>
-                  {campaign.info && (
+                  {campaign.info ? (
                     <Check state={campaign.problem ? 'fail' : 'ok'}>
                       {campaign.problem ?? `Campaign ready: “${campaign.info.campaign.name}” (draft, drag-and-drop)`}
                     </Check>
+                  ) : (
+                    <Check state="warn">No cloned campaign loaded yet — paste its link below so the slices go into it</Check>
                   )}
                 </ul>
                 <div className="grid gap-1.5">

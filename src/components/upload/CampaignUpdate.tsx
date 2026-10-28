@@ -34,12 +34,12 @@ export function CampaignUpdate({ job, campaign: c, keyReady, approved }: Props) 
     <Card className="gap-4" data-testid="campaign-card">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
-          <Megaphone className="size-4" /> Cloned campaign <span className="text-muted-foreground text-sm font-normal">(optional)</span>
+          <Megaphone className="size-4" /> Cloned campaign
         </CardTitle>
         <CardDescription>
-          Paste the link to your cloned <b>draft</b> campaign. The first <b>Send to Klaviyo</b> makes the approved slices the whole email, each as a
-          drag-and-drop image block. After that, slices you revise in Figma are swapped in place, so anything you add in Klaviyo (timer, footer…) stays.
-          Leave it empty to only upload the images.
+          Paste the link to your cloned <b>draft</b> campaign — this is where the slices go. The first <b>Send to Klaviyo</b> makes the approved slices
+          the whole email, each as a drag-and-drop image block. After that, slices you revise in Figma are swapped in place, so anything you add in
+          Klaviyo (timer, footer…) stays.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4">

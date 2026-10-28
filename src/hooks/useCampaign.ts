@@ -8,7 +8,7 @@ import { getSlices } from '@/lib/slicing'
 export type SwapResult = Awaited<ReturnType<typeof api.klaviyoSwapCampaignImages>>
 
 /**
- * State for the optional "update a cloned campaign" part of the Upload step. The Upload step's
+ * State for the "cloned campaign" part of the Upload step, where the slices go. The Upload step's
  * Send button uses `mode`:
  * - 'build': the first send to this campaign (or an explicit rebuild) — the email's whole content
  *   is replaced with the approved slices.
