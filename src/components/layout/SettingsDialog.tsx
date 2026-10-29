@@ -30,6 +30,7 @@ export function SettingsDialog({ trigger }: { trigger?: React.ReactNode }) {
 
   const figmaOk = !!s.figmaToken || !!health.data?.figmaTokenConfigured
   const klaviyoOk = !!s.klaviyoKey || !!health.data?.klaviyoKeyConfigured
+  const asanaOk = !!s.asanaToken || !!health.data?.asanaTokenConfigured
 
   return (
     <Dialog onOpenChange={(o) => o && health.refetch()}>
@@ -107,6 +108,28 @@ export function SettingsDialog({ trigger }: { trigger?: React.ReactNode }) {
             Scopes: Campaigns (read + write), Templates (read + write), Images (read + write).{' '}
             <a className="inline-flex items-center gap-0.5 underline" href="https://www.klaviyo.com/settings/account/api-keys" target="_blank" rel="noreferrer">
               Manage keys <ExternalLink className="size-3" />
+            </a>
+          </p>
+        </div>
+
+        <div className="grid gap-2">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="asana-token">Asana personal access token</Label>
+            <Status ok={asanaOk} label={s.asanaToken ? 'set here' : health.data?.asanaTokenConfigured ? 'from .env' : 'not set'} />
+          </div>
+          <Input
+            id="asana-token"
+            type="password"
+            autoComplete="off"
+            placeholder="2/1234…"
+            value={s.asanaToken}
+            onChange={(e) => s.set({ asanaToken: e.target.value })}
+          />
+          <p className="text-muted-foreground text-xs">
+            Optional. Fills each email’s subject line and preview text from its Asana task, and puts the campaign link in the task’s Link (US) / Link (CA)
+            field.{' '}
+            <a className="inline-flex items-center gap-0.5 underline" href="https://app.asana.com/0/my-apps" target="_blank" rel="noreferrer">
+              Create a token <ExternalLink className="size-3" />
             </a>
           </p>
         </div>

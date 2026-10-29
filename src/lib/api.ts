@@ -10,10 +10,11 @@ export class ApiError extends Error {
 }
 
 function authHeaders(): Record<string, string> {
-  const { figmaToken, klaviyoKey } = useSettings.getState()
+  const { figmaToken, klaviyoKey, asanaToken } = useSettings.getState()
   const h: Record<string, string> = {}
   if (figmaToken.trim()) h['x-figma-token'] = figmaToken.trim()
   if (klaviyoKey.trim()) h['x-klaviyo-key'] = klaviyoKey.trim()
+  if (asanaToken.trim()) h['x-asana-token'] = asanaToken.trim()
   return h
 }
 
@@ -44,6 +45,7 @@ export interface HealthResponse {
   ok: boolean
   figmaTokenConfigured: boolean
   klaviyoKeyConfigured: boolean
+  asanaTokenConfigured: boolean
   klaviyoRevision: string
 }
 
@@ -121,6 +123,22 @@ export interface CampaignReplaceResult {
   after?: CampaignInfo['summary']
 }
 
+/** An Asana task that may be the email's. */
+export interface AsanaTaskMatch {
+  gid: string
+  name: string
+  url: string
+  completed: boolean
+}
+
+/** The email's Asana task: its copy (null when the description has no labelled line) and link fields. */
+export interface AsanaTask extends AsanaTaskMatch {
+  status: string | null
+  subject: string | null
+  previewText: string | null
+  links: Record<'US' | 'CA', { gid: string; value: string } | null>
+}
+
 const post = <T>(path: string, body: unknown) =>
   json<T>(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
 
@@ -195,4 +213,14 @@ export const api = {
       '/api/klaviyo/campaign/swap',
       body,
     ),
+
+  klaviyoSetCampaignCopy: (body: { campaignId: string; subject: string; previewText: string }) =>
+    post<{ subject: string; previewText: string; before: { subject: string; previewText: string } }>('/api/klaviyo/campaign/copy', body),
+
+  asanaSearch: (query: string, name: string) => post<{ tasks: AsanaTaskMatch[] }>('/api/asana/search', { query, name }),
+
+  asanaTask: (idOrLink: string) => json<AsanaTask>(`/api/asana/tasks/${encodeURIComponent(idOrLink)}`),
+
+  asanaSetLink: (gid: string, region: 'US' | 'CA', url: string) =>
+    post<{ written: boolean; existing?: string }>(`/api/asana/tasks/${encodeURIComponent(gid)}/link`, { region, url }),
 }

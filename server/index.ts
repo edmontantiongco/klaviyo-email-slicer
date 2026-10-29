@@ -6,6 +6,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { figmaRouter } from './figma.ts'
 import { klaviyoRouter, KLAVIYO_REVISION } from './klaviyo.ts'
 import { campaignRouter } from './campaign.ts'
+import { asanaRouter } from './asana.ts'
 import { HttpError } from './http.ts'
 
 const PORT = Number(process.env.PORT || 8787)
@@ -17,6 +18,7 @@ app.get('/api/health', (_req, res) => {
     ok: true,
     figmaTokenConfigured: Boolean(process.env.FIGMA_TOKEN),
     klaviyoKeyConfigured: Boolean(process.env.KLAVIYO_PRIVATE_KEY),
+    asanaTokenConfigured: Boolean(process.env.ASANA_TOKEN),
     klaviyoRevision: KLAVIYO_REVISION,
   })
 })
@@ -24,6 +26,7 @@ app.get('/api/health', (_req, res) => {
 app.use('/api/figma', figmaRouter)
 app.use('/api/klaviyo/campaign', campaignRouter)
 app.use('/api/klaviyo', klaviyoRouter)
+app.use('/api/asana', asanaRouter)
 
 app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'Not found' })
@@ -48,5 +51,6 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 app.listen(PORT, () => {
   console.log(`\n  ✉  Klaviyo Email Slicer API → http://localhost:${PORT}`)
   console.log(`     Figma token: ${process.env.FIGMA_TOKEN ? 'from environment' : 'not set (enter in Settings)'}`)
-  console.log(`     Klaviyo key: ${process.env.KLAVIYO_PRIVATE_KEY ? 'from environment' : 'not set (enter in Settings)'}\n`)
+  console.log(`     Klaviyo key: ${process.env.KLAVIYO_PRIVATE_KEY ? 'from environment' : 'not set (enter in Settings)'}`)
+  console.log(`     Asana token: ${process.env.ASANA_TOKEN ? 'from environment' : 'not set (enter in Settings)'}\n`)
 })

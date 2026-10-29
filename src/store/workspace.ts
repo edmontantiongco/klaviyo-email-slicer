@@ -98,6 +98,8 @@ export interface EmailJob {
   revisions?: Record<string, RevisionRecord>
   /** Result of the last "Refresh from Figma". */
   lastRefresh?: { at: number; changed: string[]; added: string[]; removed: string[]; unchanged: number; resized: boolean }
+  /** The email's Asana task (subject line + preview text, and where the Klaviyo link goes). */
+  asana?: { gid: string; name: string; url: string }
 }
 
 export interface RevisionRecord {
@@ -124,6 +126,10 @@ export interface CampaignLink {
    * can insert the slices there. Valid only while the email is unchanged (templateUpdated).
    */
   placement?: { anchor: SliceAnchor; removed: number; at: number; templateUpdated: string | null }
+  /** Subject + preview text set from Asana. Only the first send sets them; later sends leave them alone. */
+  copySet?: { at: number; campaignId: string; subject: string; previewText: string; taskGid: string }
+  /** The campaign link was put in the Asana task's Link (US) / Link (CA) field (or it already had one). */
+  asanaLinked?: { at: number; campaignId: string; region: 'US' | 'CA'; taskGid: string }
 }
 
 interface WorkspaceState {

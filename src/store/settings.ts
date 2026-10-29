@@ -10,6 +10,8 @@ export type Theme = 'light' | 'dark' | 'system'
 export interface SettingsState {
   figmaToken: string
   klaviyoKey: string
+  /** Asana personal access token: reads each email's subject/preview text, fills its Klaviyo link. */
+  asanaToken: string
   /** Export scale for Figma renders. 'auto' targets a 1200px-wide image. */
   scale: ScaleChoice
   /** Email display width in CSS px. */
@@ -36,6 +38,7 @@ export const useSettings = create<SettingsState>()(
     (set) => ({
       figmaToken: '',
       klaviyoKey: '',
+      asanaToken: '',
       scale: 'auto',
       contentWidth: 600,
       compress: DEFAULT_COMPRESS,

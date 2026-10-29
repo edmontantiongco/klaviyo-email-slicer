@@ -21,8 +21,10 @@ import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { SettingsDialog } from '@/components/layout/SettingsDialog'
 import { CampaignUpdate } from '@/components/upload/CampaignUpdate'
+import { AsanaCopy } from '@/components/upload/AsanaCopy'
 import { RefreshFromFigmaButton } from '@/components/common/FigmaSync'
 import { useCampaign } from '@/hooks/useCampaign'
+import { useAsana } from '@/hooks/useAsana'
 import { useHealth } from '@/hooks/useHealth'
 import { useJobSlices } from '@/hooks/useJobStats'
 import type { CampaignReplaceResult } from '@/lib/api'
@@ -70,6 +72,7 @@ export function UploadStep({ job }: { job: EmailJob }) {
 
   const keyReady = !!settings.klaviyoKey || !!health.data?.klaviyoKeyConfigured
   const campaign = useCampaign(job, keyReady)
+  const asana = useAsana(job, campaign)
   const allApproved = stats.total > 0 && stats.approved === stats.total
   const allUploaded = stats.total > 0 && stats.uploaded === stats.total
   // Only approved slices upload; unapproved ones wait until they're approved.
@@ -108,6 +111,13 @@ export function UploadStep({ job }: { job: EmailJob }) {
     }
   }
 
+  /** After the campaign update: subject/preview text from Asana (first send only) and the link back to Asana. */
+  const syncAsana = async () => {
+    const { done, problems } = await asana.sync()
+    if (done.length) toast.success('Asana', { description: `${done.join('; ')}.` })
+    for (const p of problems) toast.warning('Asana', { description: p, duration: 30000, closeButton: true })
+  }
+
   /** Uploads the approved slices (and syncs renamed ones), then updates the campaign if one is set up. */
   const send = async () => {
     setReview(null)
@@ -134,6 +144,7 @@ export function UploadStep({ job }: { job: EmailJob }) {
         const result = await campaign.swap(after, false)
         campaign.swapped(result)
         warnIfCopied(result.updateRefused)
+        await syncAsana()
         const notFound = names.filter((_, i) => !result.counts[i])
         const done = names.length - notFound.length
         if (done) toast.success(`Updated ${done} revised slice${done === 1 ? '' : 's'} in the campaign`, { description: 'Everything else in the email stayed the same. Open it in Klaviyo to check, then send a test.' })
@@ -150,6 +161,8 @@ export function UploadStep({ job }: { job: EmailJob }) {
       const result = await campaign.replace(sliceRows, false)
       campaign.applied(result)
       warnIfCopied(result.updateRefused)
+      // This render's Asana state is from before the send, so it still counts as the first send.
+      await syncAsana()
       toast.success('Sent to Klaviyo', {
         description: `The email is now ${result.inserted} slice row${result.inserted === 1 ? '' : 's'}. Open the campaign in Klaviyo to check, then send a test.`,
       })
@@ -294,6 +307,8 @@ export function UploadStep({ job }: { job: EmailJob }) {
 
         <CampaignUpdate job={job} campaign={campaign} keyReady={keyReady} approved={stats.approved} />
 
+        <AsanaCopy asana={asana} campaign={campaign} />
+
         <Card className="gap-3" data-testid="send-card">
           <CardContent className="flex flex-wrap items-center gap-4">
             <div className="min-w-60 flex-1 text-sm">
@@ -380,6 +395,12 @@ export function UploadStep({ job }: { job: EmailJob }) {
                   )}
                 </>
               ) : null)}
+            {toCampaign && asana.willSetCopy && (
+              <Check state="ok">
+                Set the subject line to “{asana.task!.subject}”{asana.task!.previewText ? ` and the preview text to “${asana.task!.previewText}”` : ''} (from Asana)
+              </Check>
+            )}
+            {toCampaign && asana.willLink && <Check state="ok">Add this campaign’s link to “Link ({asana.region})” in the Asana task “{asana.task!.name}”</Check>}
           </ul>
           <DialogFooter>
             <Button variant="outline" onClick={() => setReview(null)}>

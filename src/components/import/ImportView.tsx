@@ -12,7 +12,7 @@ const PIPELINE = [
   {
     icon: Upload,
     title: 'Straight to Klaviyo',
-    text: 'One Send, after a review: builds your cloned draft campaign from the approved slices on White_BG, with product grids as tables. Later Figma revisions swap just those slices, keeping what you added in Klaviyo.',
+    text: 'One Send, after a review: builds your cloned draft campaign from the approved slices on White_BG, with product grids as tables, sets its subject line and preview text from the email’s Asana task and puts the campaign link back in Asana. Later Figma revisions swap just those slices, keeping what you added in Klaviyo.',
   },
 ]
 

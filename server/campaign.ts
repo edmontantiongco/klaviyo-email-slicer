@@ -373,3 +373,30 @@ campaignRouter.post('/replace', async (req, res) => {
     after: after.definition ? summarize(after.definition) : null,
   })
 })
+
+/**
+ * Sets the campaign email's subject line and preview text (from the email's Asana task). The rest
+ * of the email's settings (sender, reply-to…) are sent back unchanged.
+ */
+campaignRouter.post('/copy', async (req, res) => {
+  const { campaignId } = req.body ?? {}
+  const subject = String(req.body?.subject ?? '').trim()
+  const previewText = String(req.body?.previewText ?? '').trim()
+  if (!campaignId || !subject) throw new HttpError(400, 'campaignId and subject are required')
+  const l = await loadCampaign(req, { campaignId })
+  if (!l.campaign.editable) throw new HttpError(409, `“${l.campaign.name}” is ${l.campaign.status}. Only Draft campaigns can be edited.`)
+  const msg = (await kGet(req, `/campaign-messages/${l.message.id}`)).data
+  const definition = msg.attributes?.definition ?? {}
+  const patch = (content: Json) =>
+    kSend(req, 'PATCH', `/campaign-messages/${l.message.id}`, {
+      data: { type: 'campaign-message', id: l.message.id, attributes: { definition: { channel: definition.channel ?? 'email', content } } },
+    })
+  try {
+    await patch({ ...(definition.content ?? {}), subject, preview_text: previewText })
+  } catch (e) {
+    if (!(e instanceof HttpError && e.status === 400)) scopeHint(e)
+    // Klaviyo may refuse a field it returned; send just the two that change.
+    await patch({ subject, preview_text: previewText }).catch(scopeHint)
+  }
+  res.json({ subject, previewText, before: { subject: l.message.subject, previewText: l.message.previewText } })
+})
