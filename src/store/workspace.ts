@@ -65,6 +65,8 @@ export interface EmailJob {
   name: string
   source: JobSource
   createdAt: number
+  /** Last time the email was opened; the sidebar lists the most recent first. */
+  openedAt?: number
   status: 'loading' | 'ready' | 'error'
   loadingLabel?: string
   error?: string
@@ -295,7 +297,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => {
     hydrated: false,
 
     setView: (view) => set({ view }),
-    setActive: (id) => set({ activeId: id, view: 'job' }),
+    setActive: (id) => set((s) => ({ activeId: id, view: 'job', jobs: s.jobs.map((j) => (j.id === id ? { ...j, openedAt: Date.now() } : j)) })),
     patchJob: (id, patch) => patchJob(id, patch),
 
     removeJob: (id) => {
@@ -305,7 +307,7 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => {
       j?.bitmap?.close()
       set((s) => {
         const jobs = s.jobs.filter((x) => x.id !== id)
-        const activeId = s.activeId === id ? (jobs[0]?.id ?? null) : s.activeId
+        const activeId = s.activeId === id ? (byRecent(jobs)[0]?.id ?? null) : s.activeId
         return { jobs, activeId, view: activeId ? s.view : 'import' }
       })
       void idbKeys().then((ks) => ks.filter((k) => String(k).includes(id)).forEach((k) => del(k)))
@@ -591,6 +593,9 @@ export const useWorkspace = create<WorkspaceState>()((set, get) => {
   }
 })
 
+/** Most recently opened (or imported) first. */
+export const byRecent = (jobs: EmailJob[]) => [...jobs].sort((a, b) => (b.openedAt ?? b.createdAt) - (a.openedAt ?? a.createdAt))
+
 /* ----------------------------- persistence ----------------------------- */
 
 type PersistedJob = Omit<EmailJob, 'imageBlob' | 'imageUrl' | 'bitmap' | 'past' | 'future' | 'results'> & {
@@ -639,7 +644,7 @@ export async function hydrateWorkspace() {
       }
       jobs.push({ ...p, imageBlob: blob, imageUrl: URL.createObjectURL(blob), bitmap, past: [], future: [], results })
     }
-    const active = jobs.find((j) => j.id === activeId) ?? jobs[0]
+    const active = jobs.find((j) => j.id === activeId) ?? byRecent(jobs)[0]
     useWorkspace.setState({
       jobs,
       activeId: active?.id ?? null,

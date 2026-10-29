@@ -28,9 +28,10 @@ export interface SettingsState {
    * campaigns whose layout Klaviyo can't export.
    */
   emailSkeleton: EmailSkeleton | null
-  set: (patch: Partial<Omit<SettingsState, 'set' | 'setCompress' | 'rememberUrl'>>) => void
+  set: (patch: Partial<Omit<SettingsState, 'set' | 'setCompress' | 'rememberUrl' | 'forgetUrl'>>) => void
   setCompress: (patch: Partial<CompressOptions>) => void
   rememberUrl: (url: string, label: string) => void
+  forgetUrl: (url: string) => void
 }
 
 export const useSettings = create<SettingsState>()(
@@ -55,6 +56,7 @@ export const useSettings = create<SettingsState>()(
         set((s) => ({
           recentFigmaUrls: [{ url, label }, ...s.recentFigmaUrls.filter((r) => r.url !== url)].slice(0, 6),
         })),
+      forgetUrl: (url) => set((s) => ({ recentFigmaUrls: s.recentFigmaUrls.filter((r) => r.url !== url) })),
     }),
     { name: 'kes-settings', version: 1 },
   ),

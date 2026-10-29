@@ -1,14 +1,16 @@
 import { AlertTriangle, CheckCircle2, CloudUpload, Loader2, Plus, Trash2 } from 'lucide-react'
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useJobSlices } from '@/hooks/useJobStats'
 import { cn } from '@/lib/utils'
-import { useWorkspace, type EmailJob } from '@/store/workspace'
+import { useSettings } from '@/store/settings'
+import { byRecent, isJobSent, useWorkspace, type EmailJob } from '@/store/workspace'
 
-function JobItem({ job, active }: { job: EmailJob; active: boolean }) {
+function JobItem({ job, active, onDelete }: { job: EmailJob; active: boolean; onDelete: () => void }) {
   const setActive = useWorkspace((s) => s.setActive)
-  const removeJob = useWorkspace((s) => s.removeJob)
   const { stats } = useJobSlices(job)
 
   let status: React.ReactNode
@@ -67,16 +69,18 @@ function JobItem({ job, active }: { job: EmailJob; active: boolean }) {
           <Button
             variant="ghost"
             size="icon-sm"
-            className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+            className="text-muted-foreground hover:text-destructive"
+            aria-label={`Delete ${job.name}`}
+            data-testid="delete-email"
             onClick={(e) => {
               e.stopPropagation()
-              removeJob(job.id)
+              onDelete()
             }}
           >
             <Trash2 />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Remove from workspace</TooltipContent>
+        <TooltipContent>Delete from the app</TooltipContent>
       </Tooltip>
     </div>
   )
@@ -87,7 +91,15 @@ export function JobSidebar() {
   const activeId = useWorkspace((s) => s.activeId)
   const view = useWorkspace((s) => s.view)
   const setView = useWorkspace((s) => s.setView)
+  const removeJob = useWorkspace((s) => s.removeJob)
+  const compress = useSettings((s) => s.compress)
+  /** Emails waiting for the user to confirm their deletion. */
+  const [toDelete, setToDelete] = useState<EmailJob[] | null>(null)
+  // Kept while the dialog animates closed, so its text doesn't blank out.
+  const [shown, setShown] = useState<EmailJob[]>([])
+  if (toDelete && toDelete !== shown) setShown(toDelete)
   if (!jobs.length) return null
+  const sent = jobs.filter((j) => isJobSent(j, compress))
   return (
     <aside className="bg-card hidden w-64 shrink-0 flex-col border-r md:flex">
       <div className="flex items-center justify-between px-3 pt-3 pb-2">
@@ -96,13 +108,53 @@ export function JobSidebar() {
           <Plus /> Import
         </Button>
       </div>
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="grid gap-1 px-2 pb-3">
-          {jobs.map((j) => (
-            <JobItem key={j.id} job={j} active={view === 'job' && j.id === activeId} />
+      {sent.length > 0 && (
+        <button className="text-muted-foreground hover:text-destructive mx-3 mb-2 flex w-fit items-center gap-1 text-xs" onClick={() => setToDelete(sent)} data-testid="delete-sent">
+          <Trash2 className="size-3" /> Delete {sent.length} sent email{sent.length === 1 ? '' : 's'}
+        </button>
+      )}
+      {/* Radix sizes its content box to the widest row; keep it to the sidebar's width so long names truncate and the delete button stays visible. */}
+      <ScrollArea className="min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:!block">
+        <div className="grid grid-cols-1 gap-1 px-2 pb-3">
+          {byRecent(jobs).map((j) => (
+            <JobItem key={j.id} job={j} active={view === 'job' && j.id === activeId} onDelete={() => setToDelete([j])} />
           ))}
         </div>
       </ScrollArea>
+
+      <Dialog open={!!toDelete} onOpenChange={(o) => !o && setToDelete(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{shown.length === 1 ? `Delete “${shown[0].name}”?` : `Delete ${shown.length} sent emails?`}</DialogTitle>
+            <DialogDescription>
+              {shown.length === 1 ? 'It’s' : 'They’re'} removed from the app with {shown.length === 1 ? 'its' : 'their'} slices. Images already in Klaviyo
+              and the Klaviyo campaign stay as they are.
+            </DialogDescription>
+          </DialogHeader>
+          {shown.length > 1 && (
+            <ul className="text-muted-foreground max-h-48 list-disc overflow-y-auto pl-5 text-sm">
+              {shown.map((j) => (
+                <li key={j.id}>{j.name}</li>
+              ))}
+            </ul>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setToDelete(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              data-testid="confirm-delete"
+              onClick={() => {
+                toDelete?.forEach((j) => removeJob(j.id))
+                setToDelete(null)
+              }}
+            >
+              <Trash2 /> Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </aside>
   )
 }

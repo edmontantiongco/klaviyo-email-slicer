@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, Check, ChevronRight, FolderOpen, Frame, History, Loader2, Search, Settings2 } from 'lucide-react'
+import { ArrowLeft, Check, ChevronRight, FolderOpen, Frame, History, Loader2, Search, Settings2, X } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -24,7 +24,7 @@ export function FigmaImport() {
   const [target, setTarget] = useState<Target | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [filter, setFilter] = useState('')
-  const { figmaToken, recentFigmaUrls, rememberUrl, scale } = useSettings()
+  const { figmaToken, recentFigmaUrls, rememberUrl, forgetUrl, scale } = useSettings()
   const health = useHealth()
   const addFigmaJobs = useWorkspace((s) => s.addFigmaJobs)
   const tokenMissing = !figmaToken && health.data && !health.data.figmaTokenConfigured
@@ -133,13 +133,14 @@ export function FigmaImport() {
               <History className="size-3" /> Recent
             </div>
             {recentFigmaUrls.map((r) => (
-              <button
-                key={r.url}
-                className="hover:bg-accent truncate rounded px-2 py-1 text-left text-sm"
-                onClick={() => submit(r.url)}
-              >
-                {r.label}
-              </button>
+              <div key={r.url} className="hover:bg-accent group flex items-center rounded">
+                <button className="min-w-0 flex-1 truncate px-2 py-1 text-left text-sm" onClick={() => submit(r.url)}>
+                  {r.label}
+                </button>
+                <Button variant="ghost" size="icon-sm" className="text-muted-foreground shrink-0" aria-label="Remove from recent" onClick={() => forgetUrl(r.url)}>
+                  <X />
+                </Button>
+              </div>
             ))}
           </div>
         )}
